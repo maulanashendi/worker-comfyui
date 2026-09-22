@@ -6,7 +6,7 @@ This document outlines the environment variables available for configuring the `
 
 | Environment Variable | Description                                                                                                                                                                                                                  | Default |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `REFRESH_WORKER`     | When `true`, the worker pod will stop after each completed job to ensure a clean state for the next job. See the [RunPod documentation](https://docs.runpod.io/docs/handler-additional-controls#refresh-worker) for details. | `false` |
+| `REFRESH_WORKER`     | When `true`, the worker pod will stop after each completed job to ensure a clean state for the next job. See the [RunPod documentation](https://docs.runpod.io/docs/handler-additional-controls#refresh-worker) for details. | `true` |
 | `SERVE_API_LOCALLY`  | When `true`, enables a local HTTP server simulating the RunPod environment for development and testing. See the [Development Guide](development.md#local-api) for more details.                                              | `false` |
 | `COMFY_ORG_API_KEY`  | Comfy.org API key to enable ComfyUI API Nodes. If set, it is sent with each workflow; clients can override per request via `input.api_key_comfy_org`.                                                                        | –       |
 
@@ -67,3 +67,8 @@ If the S3 environment variables (`BUCKET_ENDPOINT_URL`, `BUCKET_ACCESS_KEY_ID`, 
 ```
 
 The `data` field contains the presigned URL to the uploaded image file in your S3 bucket. The path usually includes the job ID.
+
+## Workflow model bootstrap
+
+See [runtime manifests](customization.md#generic-workflow-selection-and-model-cache) for `WORKFLOWS` (legacy alias `WORKFLOW_MANIFESTS`), `WORKFLOW_DIR`, `COMFY_MODEL_ROOT`, `HF_TOKEN`, `PREPARE_MODELS_ONLY`, `MODEL_DOWNLOAD_POLICY`, `MODEL_DOWNLOAD_CONCURRENCY`, and `MODEL_DOWNLOAD_CHECK_ONLY`.
+`OUTPUT_FORMAT=senai` enables the Senai media envelope and AWS S3/R2 output configuration.

@@ -1,0 +1,5 @@
+version: 1
+workflows:
+  - video_minimax_h3_r2v.json
+# Model URLs and directories are read from the workflow's properties.models.
+# This workflow declares only comfy-core nodes; no extra node repository.

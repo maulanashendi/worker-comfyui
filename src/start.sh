@@ -1,5 +1,53 @@
 #!/usr/bin/env bash
 
+set -eo pipefail
+
+WORKER_ROOT="${WORKER_ROOT:-/}"
+COMFY_ROOT="${COMFY_ROOT:-/comfyui}"
+if [ -d /runpod-volume ]; then
+    default_model_root=/runpod-volume/models
+else
+    default_model_root="$COMFY_ROOT/models"
+fi
+export COMFY_MODEL_ROOT="${COMFY_MODEL_ROOT:-$default_model_root}"
+export COMFY_PID_FILE="${COMFY_PID_FILE:-/tmp/comfyui.pid}"
+export REFRESH_WORKER="${REFRESH_WORKER:-true}"
+
+# A checklist is an explicit standalone mode: never start a worker without models.
+if [ "${MODEL_DOWNLOAD_CHECK_ONLY:-false}" = "true" ]; then
+    exec python3 "$WORKER_ROOT/workflow_models.py" --check
+fi
+
+if [ "${PREPARE_MODELS_ONLY:-false}" = "true" ]; then
+    exec python3 "$WORKER_ROOT/workflow_models.py"
+fi
+
+comfy_pid=""
+handler_pid=""
+cleanup() {
+    trap - EXIT TERM INT
+    for pid in "$handler_pid" "$comfy_pid"; do
+        [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
+    done
+    # Bound shutdown even if a child ignores SIGTERM.
+    for attempt in {1..50}; do
+        alive=false
+        for pid in "$handler_pid" "$comfy_pid"; do
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then alive=true; fi
+        done
+        [ "$alive" = true ] || break
+        sleep 0.1
+    done
+    for pid in "$handler_pid" "$comfy_pid"; do
+        [ -z "$pid" ] || kill -KILL "$pid" 2>/dev/null || true
+        [ -z "$pid" ] || wait "$pid" 2>/dev/null || true
+    done
+    rm -f "$COMFY_PID_FILE"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+
 # Start SSH server if PUBLIC_KEY is set (enables remote access and dev-sync.sh)
 if [ -n "$PUBLIC_KEY" ]; then
     mkdir -p ~/.ssh
@@ -19,8 +67,8 @@ if [ -n "$PUBLIC_KEY" ]; then
 fi
 
 # Use libtcmalloc for better memory management
-TCMALLOC="$(ldconfig -p | grep -Po "libtcmalloc.so.\d" | head -n 1)"
-export LD_PRELOAD="${TCMALLOC}"
+TCMALLOC="$(ldconfig -p | grep -Po "libtcmalloc.so.\d" | head -n 1 || true)"
+if [ -n "$TCMALLOC" ]; then export LD_PRELOAD="${TCMALLOC}"; fi
 
 # ---------------------------------------------------------------------------
 # GPU pre-flight check
@@ -56,6 +104,11 @@ except Exception as e:
 fi
 echo "worker-comfyui: GPU available — $GPU_CHECK"
 
+python3 "$WORKER_ROOT/workflow_models.py" &
+handler_pid=$!
+wait "$handler_pid"
+handler_pid=""
+
 # Ensure ComfyUI-Manager runs in offline network mode inside the container
 comfy-manager-set-mode offline || echo "worker-comfyui - Could not set ComfyUI-Manager network_mode" >&2
 
@@ -64,20 +117,25 @@ echo "worker-comfyui: Starting ComfyUI"
 # Allow operators to tweak verbosity; default is DEBUG.
 : "${COMFY_LOG_LEVEL:=DEBUG}"
 
-# PID file used by the handler to detect if ComfyUI is still running
-COMFY_PID_FILE="/tmp/comfyui.pid"
-
-# Serve the API and don't shutdown the container
-if [ "$SERVE_API_LOCALLY" == "true" ]; then
-    python -u /comfyui/main.py --disable-auto-launch --disable-metadata --listen --verbose "${COMFY_LOG_LEVEL}" --log-stdout &
-    echo $! > "$COMFY_PID_FILE"
-
-    echo "worker-comfyui: Starting RunPod Handler"
-    python -u /handler.py --rp_serve_api --rp_api_host=0.0.0.0
-else
-    python -u /comfyui/main.py --disable-auto-launch --disable-metadata --verbose "${COMFY_LOG_LEVEL}" --log-stdout &
-    echo $! > "$COMFY_PID_FILE"
-
-    echo "worker-comfyui: Starting RunPod Handler"
-    python -u /handler.py
+comfy_args=(--disable-auto-launch --disable-metadata --verbose "$COMFY_LOG_LEVEL" --log-stdout)
+if [ -n "${WORKFLOWS:-${WORKFLOW_MANIFESTS:-}}" ]; then
+    comfy_args+=(--extra-model-paths-config "${WORKFLOW_MODEL_PATHS:-/tmp/workflow_model_paths.yaml}")
 fi
+handler_args=()
+if [ "${SERVE_API_LOCALLY:-false}" = "true" ]; then
+    comfy_args+=(--listen)
+    handler_args+=(--rp_serve_api --rp_api_host=0.0.0.0)
+fi
+python -u "$COMFY_ROOT/main.py" "${comfy_args[@]}" &
+comfy_pid=$!
+echo "$comfy_pid" > "$COMFY_PID_FILE"
+echo "worker-comfyui: Starting RunPod Handler"
+python -u "$WORKER_ROOT/handler.py" "${handler_args[@]}" "$@" &
+handler_pid=$!
+
+# Exit when either service exits; the EXIT trap stops the other child.
+status=0
+finished=""
+wait -n -p finished "$comfy_pid" "$handler_pid" || status=$?
+if [ "$finished" = "$comfy_pid" ] && [ "$status" = 0 ]; then status=1; fi
+exit "$status"

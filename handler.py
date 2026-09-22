@@ -37,7 +37,7 @@ COMFY_API_AVAILABLE_MAX_RETRIES = int(
 # Fallback retry limit when PID file is unavailable and retries=0
 COMFY_API_FALLBACK_MAX_RETRIES = 500
 # PID file written by start.sh so we can detect if ComfyUI has crashed
-COMFY_PID_FILE = "/tmp/comfyui.pid"
+COMFY_PID_FILE = os.environ.get("COMFY_PID_FILE", "/tmp/comfyui.pid")
 # Websocket reconnection behaviour (can be overridden through environment variables)
 # NOTE: more attempts and diagnostics improve debuggability whenever ComfyUI crashes mid-job.
 #   • WEBSOCKET_RECONNECT_ATTEMPTS sets how many times we will try to reconnect.
@@ -57,7 +57,7 @@ if os.environ.get("WEBSOCKET_TRACE", "false").lower() == "true":
 COMFY_HOST = "127.0.0.1:8188"
 # Enforce a clean state after each job is done
 # see https://docs.runpod.io/docs/handler-additional-controls#refresh-worker
-REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "false").lower() == "true"
+REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "true").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Model loader nodes — used for pre-flight validation of workflow model refs
@@ -68,6 +68,8 @@ REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "false").lower() == "true"
 MODEL_LOADER_NODES = {
     "CheckpointLoaderSimple": ("checkpoints", ("ckpt_name",)),
     "LoraLoader": ("loras", ("lora_name",)),
+    "CLIPLoader": ("text_encoders", ("clip_name",)),
+    "LatentUpscaleModelLoader": ("latent_upscale_models", ("model_name",)),
     "VAELoader": ("vae", ("vae_name",)),
     "DualCLIPLoader": ("text_encoders", ("clip_name1", "clip_name2")),
     "TripleCLIPLoader": ("text_encoders", ("clip_name1", "clip_name2", "clip_name3")),
@@ -806,7 +808,7 @@ def get_image_data(filename, subfolder, image_type):
         return None
 
 
-def handler(job):
+def _handle_job(job):
     """
     Handles a job using ComfyUI via websockets for status and image retrieval.
 
@@ -995,7 +997,16 @@ def handler(job):
                 errors.append(warning_msg)
 
         print(f"worker-comfyui - Processing {len(outputs)} output nodes...")
+        if os.getenv("OUTPUT_FORMAT") == "senai":
+            from media_output import collect_senai_outputs
+            return collect_senai_outputs(outputs, job_id, get_image_data, errors)
+
         for node_id, node_output in outputs.items():
+            node_output = dict(node_output)
+            node_output["images"] = [
+                entry for key in ("images", "videos", "gifs", "audio")
+                for entry in node_output.get(key, [])
+            ]
             if "images" in node_output:
                 print(
                     f"worker-comfyui - Node {node_id} contains {len(node_output['images'])} image(s)"
@@ -1085,7 +1096,7 @@ def handler(job):
                         errors.append(error_msg)
 
             # Check for other output types
-            other_keys = [k for k in node_output.keys() if k != "images"]
+            other_keys = [k for k in node_output.keys() if k not in ("images", "videos", "gifs", "audio")]
             if other_keys:
                 warn_msg = (
                     f"Node {node_id} produced unhandled output keys: {other_keys}."
@@ -1140,6 +1151,20 @@ def handler(job):
 
     print(f"worker-comfyui - Job completed. Returning {len(output_data)} image(s).")
     return final_result
+
+
+def handler(job):
+    """Return results before asking Runpod to retire this worker, on every path."""
+    try:
+        result = _handle_job(job)
+    except Exception:
+        logger.exception("Unhandled job failure")
+        result = {"error": "Unexpected job failure"}
+    if os.getenv("OUTPUT_FORMAT") == "senai" and "error" in result:
+        result["status"] = "error"
+    if REFRESH_WORKER:
+        result["refresh_worker"] = True
+    return result
 
 
 if __name__ == "__main__":

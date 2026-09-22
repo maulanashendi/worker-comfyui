@@ -2,3 +2,7 @@ node_modules
 .changeset
 .git
 .github
+
+__pycache__
+.pytest_cache
+.venv

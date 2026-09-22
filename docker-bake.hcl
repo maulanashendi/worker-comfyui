@@ -31,12 +31,16 @@ variable "PYTORCH_INDEX_URL" {
   default = ""
 }
 
+variable "CUSTOM_NODE_MANIFESTS" {
+  default = ""
+}
+
 variable "HUGGINGFACE_ACCESS_TOKEN" {
   default = ""
 }
 
 group "default" {
-  targets = ["base", "sdxl", "sd3", "flux1-schnell", "flux1-dev", "flux1-dev-fp8", "z-image-turbo", "base-cuda12-8-1"]
+  targets = ["base"]
 }
 
 target "base" {
@@ -50,7 +54,7 @@ target "base" {
     CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
     ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
     PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
-    MODEL_TYPE = "base"
+    CUSTOM_NODE_MANIFESTS = "${CUSTOM_NODE_MANIFESTS}"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-base"]
 }
@@ -58,7 +62,7 @@ target "base" {
 target "sdxl" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "final"
+  target = "baked-models"
   args = {
     BASE_IMAGE = "${BASE_IMAGE}"
     COMFYUI_VERSION = "${COMFYUI_VERSION}"
@@ -74,7 +78,7 @@ target "sdxl" {
 target "sd3" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "final"
+  target = "baked-models"
   args = {
     BASE_IMAGE = "${BASE_IMAGE}"
     COMFYUI_VERSION = "${COMFYUI_VERSION}"
@@ -91,7 +95,7 @@ target "sd3" {
 target "flux1-schnell" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "final"
+  target = "baked-models"
   args = {
     BASE_IMAGE = "${BASE_IMAGE}"
     COMFYUI_VERSION = "${COMFYUI_VERSION}"
@@ -108,7 +112,7 @@ target "flux1-schnell" {
 target "flux1-dev" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "final"
+  target = "baked-models"
   args = {
     BASE_IMAGE = "${BASE_IMAGE}"
     COMFYUI_VERSION = "${COMFYUI_VERSION}"
@@ -125,7 +129,7 @@ target "flux1-dev" {
 target "flux1-dev-fp8" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "final"
+  target = "baked-models"
   args = {
     BASE_IMAGE = "${BASE_IMAGE}"
     COMFYUI_VERSION = "${COMFYUI_VERSION}"
@@ -141,7 +145,7 @@ target "flux1-dev-fp8" {
 target "z-image-turbo" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "final"
+  target = "baked-models"
   args = {
     BASE_IMAGE = "${BASE_IMAGE}"
     COMFYUI_VERSION = "${COMFYUI_VERSION}"
@@ -166,7 +170,7 @@ target "base-cuda12-8-1" {
     CUDA_VERSION_FOR_COMFY = ""
     ENABLE_PYTORCH_UPGRADE = "true"
     PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
-    MODEL_TYPE = "base"
+    CUSTOM_NODE_MANIFESTS = "${CUSTOM_NODE_MANIFESTS}"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-base-cuda12.8.1"]
 }

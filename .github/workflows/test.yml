@@ -15,5 +15,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Placeholder test
-        run: echo "Tests temporarily disabled - placeholder to satisfy required checks"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt pytest
+      - name: Worker contracts and lifecycle
+        run: python -m pytest tests -q
+      - name: Startup syntax
+        run: bash -n src/start.sh

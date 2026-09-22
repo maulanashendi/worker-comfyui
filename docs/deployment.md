@@ -105,3 +105,85 @@ RunPod offers a seamless way to deploy directly from your GitHub repository cont
 5.  **Deploy:** RunPod will clone the repository, build the image from your specified branch and Dockerfile, push it to a temporary registry, and deploy the endpoint.
 
 Every `git push` to the configured branch will automatically trigger a new build and update your RunPod endpoint. For more details, refer to the [RunPod GitHub Integration Documentation](https://docs.runpod.io/serverless/github-integration).
+
+## Generic worker: prepare assets separately from serving
+
+Build the model-free image once (MiniMax uses only core nodes):
+
+```bash
+docker build --platform linux/amd64 -t worker-comfyui:generic .
+```
+
+For extra node dependencies, use the same Dockerfile with
+`--build-arg CUSTOM_NODE_MANIFESTS=ltx25.yaml`. There is no `ltx25` target and no
+hardcoded LTX runtime environment. Default `docker buildx bake` builds only base.
+Historical baked-model release targets remain explicit opt-ins; adding another
+workflow does not require adding one of these targets.
+
+Inspect MiniMax's model checklist without a GPU or download:
+
+```bash
+docker run --rm -e WORKFLOWS=minimax-h3.yaml \
+  -e MODEL_DOWNLOAD_CHECK_ONLY=true worker-comfyui:generic
+```
+
+Populate a shared volume once, outside serving workers:
+
+```bash
+docker run --rm -v "$PWD/model-cache:/runpod-volume" \
+  -e WORKFLOWS=minimax-h3.yaml -e PREPARE_MODELS_ONLY=true \
+  -e MODEL_DOWNLOAD_POLICY=missing worker-comfyui:generic
+```
+
+On Runpod, perform equivalent preparation against the **same network volume**
+attached to the endpoint; a local Docker directory is not that remote volume.
+Then configure the serving endpoint:
+
+```dotenv
+WORKFLOWS=minimax-h3.yaml
+MODEL_DOWNLOAD_POLICY=cache-only
+COMFY_MODEL_ROOT=/runpod-volume/models
+REFRESH_WORKER=true
+# For Senai consumers, plus AWS storage credentials:
+OUTPUT_FORMAT=senai
+```
+
+Switch to `WORKFLOWS=ltx25.yaml` for LTX after preparing its cache and ensuring
+its node dependencies are installed. Mounted workflow definitions can change
+without a rebuild. Select only workflows the endpoint actually serves.
+
+`cache-only` removes download and whole-file hashing from cold start, but does
+not remove image pull, Python/ComfyUI initialization or model-to-GPU loading.
+No GPU latency measurements have been made locally.
+
+`REFRESH_WORKER=true` requests retirement after each success or error response.
+The SDK sends the result with `stopPod`; `start.sh` cleans up child processes on
+exit/SIGTERM. Set endpoint Active Workers = 0, Max Workers = 1 initially and idle
+timeout = 5 seconds. Cloud retirement still needs a live acceptance check.
+
+### Local verification and staging checklist
+
+```bash
+docker build --platform linux/amd64 -f tests/Dockerfile -t worker-comfyui-tests .
+docker run --rm worker-comfyui-tests
+```
+
+Tests use the real startup script, handler and Runpod SDK, with external services
+mocked. They cover selected-only downloads, MiniMax editor metadata, all three
+Senai LTX graphs, cache-only/no-network startup, cache invalidation, shared-volume
+locking, handler responses, SDK `stopPod`, crash/SIGTERM and process cleanup.
+
+- [ ] Download real weights and pin source revisions/checksums.
+- [ ] Build the production GPU image and validate required node registrations.
+- [ ] Prepare the remote network volume, then boot with `cache-only`.
+- [ ] Submit API-format workflows and reference assets for actual GPU inference.
+- [ ] Verify storage URLs remain readable after retirement.
+- [ ] Observe workers scale to zero and measure cold start on the staging endpoint.
+
+Real model downloads remain skipped. No endpoint is created by the local tests.
+
+Local verification (2026-09-22): **49 tests passed** in the Python 3.12 CPU
+container. MiniMax checklist selects five assets only. `docker buildx bake
+--print` selects only `base`; startup syntax and whitespace checks passed.
+Production GPU build, actual weight downloads and cloud cold-start timing have
+not been measured.

@@ -14,7 +14,8 @@ This project allows you to run ComfyUI workflows as a serverless API endpoint on
 
 ## Table of Contents
 
-- [Quickstart](#quickstart)
+- [Alur worker generik: dari workflow sampai endpoint](#alur-worker-generik-dari-workflow-sampai-endpoint)
+- [Quickstart upstream](#quickstart-upstream)
 - [Available Docker Images](#available-docker-images)
 - [API Specification](#api-specification)
 - [Usage](#usage)
@@ -23,7 +24,229 @@ This project allows you to run ComfyUI workflows as a serverless API endpoint on
 
 ---
 
-## Quickstart
+## Alur worker generik: dari workflow sampai endpoint
+
+Alur yang digunakan repo ini:
+
+**Pilih workflow → tes lokal → build image → checklist model → isi cache sekali → jalankan endpoint `cache-only` → hasil dikirim → worker dihentikan.**
+
+Image default berisi runtime ComfyUI dan handler, tanpa bobot model dan tanpa
+workflow aktif. Menambahkan workflow tidak memerlukan target Docker baru.
+Semua perintah berikut dijalankan dari direktori `worker-comfyui/`.
+
+### 1. Pilih workflow yang akan dilayani
+
+| Workflow | Nilai `WORKFLOWS` | Sumber daftar model | Dependency tambahan saat build |
+| --- | --- | --- | --- |
+| MiniMax H3 R2V | `minimax-h3.yaml` | Metadata di `video_minimax_h3_r2v.json`; 5 aset | Tidak ada custom node dalam graph yang disediakan |
+| LTX 2.5 Senai | `ltx25.yaml` | Enam aset untuk graph T2V, I2V, dan FLF | `CUSTOM_NODE_MANIFESTS=ltx25.yaml` |
+
+Contoh berikut memakai MiniMax:
+
+```bash
+export WORKFLOWS=minimax-h3.yaml
+export WORKER_IMAGE=worker-comfyui:generic
+```
+
+`WORKFLOWS=video_minimax_h3_r2v.json` juga valid untuk membaca metadata model
+langsung. File lain dalam folder `workflow/` tidak otomatis diunduh.
+`WORKFLOW_MANIFESTS` tetap didukung sebagai alias lama; `WORKFLOWS` diprioritaskan.
+
+**Bedakan dua format:** JSON editor MiniMax dipakai untuk menemukan aset model.
+Handler tetap menerima **JSON API** dalam `input.workflow`; export melalui
+ComfyUI sebelum mengirim job. Pemilihan env menyiapkan aset, bukan otomatis
+menjalankan graph atau mengubah format editor menjadi API.
+
+### 2. Jalankan tes lokal tanpa GPU dan tanpa download model
+
+```bash
+docker build --platform linux/amd64 \
+  -f tests/Dockerfile -t worker-comfyui-tests .
+docker run --rm worker-comfyui-tests
+```
+
+Tes mencakup pemilihan aset, cache, download dengan data tiruan, respons handler,
+SDK Runpod `stopPod`, serta cleanup proses ketika selesai, crash, dan SIGTERM.
+Hasil terakhir: **49 tes lulus**. Layanan ComfyUI/GPU, download dan S3 dimock;
+ini belum membuktikan inference atau penghentian worker di cloud.
+
+### 3. Build image runtime generik
+
+Untuk MiniMax:
+
+```bash
+docker build --platform linux/amd64 -t "$WORKER_IMAGE" .
+```
+
+Untuk LTX, gunakan Dockerfile yang sama dengan dependency terpilih:
+
+```bash
+export WORKFLOWS=ltx25.yaml
+export WORKER_IMAGE=worker-comfyui:with-ltx-nodes
+docker build --platform linux/amd64 \
+  --build-arg CUSTOM_NODE_MANIFESTS=ltx25.yaml \
+  -t "$WORKER_IMAGE" .
+```
+
+Build arg memasang custom node yang dipin dalam YAML, bukan bobot model atau
+pilihan workflow runtime. Tidak ada target `--target ltx25`. Perubahan dependency
+Python/custom node membutuhkan rebuild; perubahan model tidak.
+
+### 4. Periksa checklist model terlebih dahulu
+
+```bash
+docker run --rm \
+  -e WORKFLOWS="$WORKFLOWS" \
+  -e MODEL_DOWNLOAD_CHECK_ONLY=true \
+  "$WORKER_IMAGE"
+```
+
+Container mencetak aset terpilih lalu berhenti, tanpa GPU check, download,
+ComfyUI, atau handler. MiniMax harus menampilkan lima aset MiniMax saja.
+
+**Untuk tahap validasi tanpa bobot nyata, berhenti di sini.** Langkah pengisian
+cache berikut memang melakukan download; lanjutkan ketika siap mengunduh model.
+
+### 5. Isi cache sekali, terpisah dari worker yang melayani job
+
+Contoh cache lokal:
+
+```bash
+mkdir -p model-cache
+docker run --rm \
+  -v "$PWD/model-cache:/runpod-volume" \
+  -e WORKFLOWS="$WORKFLOWS" \
+  -e PREPARE_MODELS_ONLY=true \
+  -e MODEL_DOWNLOAD_POLICY=missing \
+  -e MODEL_DOWNLOAD_CONCURRENCY=4 \
+  "$WORKER_IMAGE"
+```
+
+Untuk model yang memerlukan autentikasi, isi `HF_TOKEN` di lingkungan shell dan
+tambahkan `-e HF_TOKEN` pada perintah tersebut. Proses preparation tidak memerlukan
+GPU dan berhenti setelah selesai. Bobot tersimpan di `model-cache/models/`.
+
+Download menggunakan file sementara, penggantian atomik, dan lock per model.
+Receipt `.worker-cache.json` disimpan di samping bobot. Pertahankan receipt ketika
+menggunakan kembali cache; `cache-only` memeriksa receipt, sumber, ukuran, dan
+mtime tanpa membaca seluruh bobot untuk menghitung ulang hash.
+
+Untuk Runpod, isi **network volume yang sama** dengan yang akan dipasang pada
+endpoint. Folder Docker lokal di atas bukan network volume Runpod. Jalankan image
+preparation pada compute sementara yang memasang volume tersebut dan atur
+`COMFY_MODEL_ROOT` ke lokasi aktualnya. Contoh: bila volume pada Pod terpasang di
+`/workspace`, gunakan `/workspace/models`; isi volume itu nantinya terlihat sebagai
+`/runpod-volume/models` pada serverless. Hentikan compute preparation setelah selesai.
+
+Jika cache dipindahkan dan mtime berubah, jalankan preparation lagi terhadap
+lokasi tujuan sebelum serving. Untuk unduhan yang dapat direproduksi, pin revision
+URL dan isi SHA256 dalam manifest; contoh awal masih memakai URL upstream `main`.
+
+### 6. Siapkan image dan konfigurasi endpoint
+
+Push image hasil build ke registry milik Anda:
+
+```bash
+export REGISTRY_IMAGE=ghcr.io/your-account/worker-comfyui:generic-v1
+docker login ghcr.io
+docker tag "$WORKER_IMAGE" "$REGISTRY_IMAGE"
+docker push "$REGISTRY_IMAGE"
+```
+
+Ganti `your-account` dan tag sesuai registry tujuan. Di Runpod, buat template
+serverless menggunakan image tersebut, lalu endpoint queue-based dengan:
+
+- Network volume yang sudah diisi pada langkah 5.
+- GPU dan kapasitas disk yang sesuai dengan workflow.
+- Active Workers **0**, Max Workers **1** untuk pengujian awal.
+- Idle timeout **5 detik** dan satu job per worker pada satu waktu.
+
+Isi env endpoint (contoh MiniMax):
+
+```dotenv
+WORKFLOWS=minimax-h3.yaml
+MODEL_DOWNLOAD_POLICY=cache-only
+COMFY_MODEL_ROOT=/runpod-volume/models
+REFRESH_WORKER=true
+```
+
+Jangan aktifkan `PREPARE_MODELS_ONLY`, `MODEL_DOWNLOAD_CHECK_ONLY`, atau
+`SERVE_API_LOCALLY` pada endpoint serving. Cache yang belum siap akan menghasilkan
+error yang meminta preparation; worker tidak diam-diam mengunduh saat cold start.
+
+Untuk konsumen dengan kontrak respons Senai, tambahkan:
+
+```dotenv
+OUTPUT_FORMAT=senai
+AWS_BUCKET_NAME=your-output-bucket
+AWS_ENDPOINT_URL=https://your-account.r2.cloudflarestorage.com
+AWS_DEFAULT_REGION=auto
+```
+
+Simpan `AWS_ACCESS_KEY_ID` dan `AWS_SECRET_ACCESS_KEY` sebagai secret endpoint.
+Sesuaikan endpoint/region untuk storage yang digunakan. Senai harus mengizinkan
+hostname hasil di `allowed_output_hosts`; output base64 ditolak oleh Senai.
+`OUTPUT_FORMAT=senai` hanya mengatur format respons, bukan menambahkan dukungan
+model MiniMax ke katalog atau codec aplikasi Senai.
+
+### 7. Kirim job API dan verifikasi sampai worker berhenti
+
+Siapkan `request.json` dengan envelope `{"input":{"workflow": ...}}` berisi
+graph API lengkap. Untuk R2V/I2V, tambahkan `input.images` berisi nama dan base64
+gambar referensi yang cocok dengan node `LoadImage`. Jangan mengirim JSON editor
+MiniMax langsung sebagai payload.
+
+Dengan `RUNPOD_API_KEY` dan `RUNPOD_ENDPOINT_ID` sudah diisi pada shell:
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  --data-binary @request.json \
+  "https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/run"
+```
+
+Salin `id` dari respons, kemudian periksa status sampai terminal:
+
+```bash
+export RUNPOD_JOB_ID=replace-with-returned-job-id
+curl --fail-with-body \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  "https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/status/$RUNPOD_JOB_ID"
+```
+
+Pastikan hasil video tersedia, URL storage tetap dapat dibaca setelah worker
+berhenti, dan jumlah worker aktif/idle kembali nol saat antrean kosong.
+`REFRESH_WORKER=true` meminta retirement melalui SDK setelah hasil dikembalikan;
+Runpod yang melakukan penghentian cloud. `start.sh` membersihkan proses anak pada
+exit/SIGTERM. Verifikasi ini tetap diperlukan di staging.
+
+Cache menghilangkan download dan hashing seluruh bobot saat cold start, tetapi
+image pull, startup ComfyUI, dan pemuatan bobot ke GPU tetap membutuhkan waktu.
+Build produksi GPU, download bobot nyata, dan latensi cloud belum diverifikasi
+oleh tes CPU di atas.
+
+### 8. Tambahkan atau ganti workflow berikutnya
+
+1. Tambahkan JSON ke `workflow/`. Jika editor JSON memiliki `properties.models`,
+   buat YAML yang merujuk file itu, seperti [`minimax-h3.yaml`](workflow/minimax-h3.yaml).
+   Untuk graph tanpa URL model, tulis `models` secara eksplisit seperti
+   [`ltx25.yaml`](workflow/ltx25.yaml).
+2. Pasang definisi workflow melalui volume dengan `WORKFLOW_DIR` yang sesuai,
+   atau rebuild image untuk menyertakan file baru di `/workflow`.
+3. Jika ada custom node baru, deklarasikan repo dan commit dalam YAML, lalu build
+   dengan `CUSTOM_NODE_MANIFESTS` yang sesuai. Dependency tidak dipasang saat boot.
+4. Jalankan checklist dan preparation untuk workflow baru pada cache yang sama.
+5. Ubah `WORKFLOWS` pada endpoint dan tetap gunakan `cache-only`. Beberapa workflow
+   bisa dipilih dengan koma; hanya pilih yang memang akan dilayani.
+
+Detail schema dan cache ada di [Customization Guide](docs/customization.md#generic-workflow-selection-and-model-cache),
+dan checklist staging ada di [Deployment Guide](docs/deployment.md#generic-worker-prepare-assets-separately-from-serving).
+
+## Quickstart upstream
+
+Bagian berikut menjelaskan image upstream yang sudah dipublikasikan. Untuk build
+repo ini dan alur cache baru, gunakan panduan worker generik di atas.
 
 1.  🐳 Choose one of the [available Docker images](#available-docker-images) for your serverless endpoint (e.g., `runpod/worker-comfyui:<version>-sd3`).
 2.  📄 Follow the [Deployment Guide](docs/deployment.md) to set up your RunPod template and endpoint.

@@ -110,3 +110,95 @@ Using a Network Volume is primarily useful if you want to manage **models** sepa
 >
 > - When a Network Volume is correctly attached, ComfyUI running inside the worker container will automatically detect and load models from the standard directories (`/runpod-volume/models/...`) within that volume (for serverless workers). For directory mapping details and troubleshooting, see [Network Volumes & Model Paths](network-volumes.md).
 > - This method is **not suitable for installing custom nodes**; use the Custom Dockerfile method for that.
+
+## Generic workflow selection and model cache
+
+The default Docker image contains no model weights and selects no workflow.
+Adding a workflow does not add a Docker stage or download unrelated models.
+`WORKFLOWS` selects comma-separated YAML manifests or editor JSON files from
+`WORKFLOW_DIR` (default `/workflow`). `WORKFLOW_MANIFESTS` remains a legacy alias;
+`WORKFLOWS` takes precedence. Files elsewhere in the directory are not scanned.
+
+```dotenv
+WORKFLOWS=minimax-h3.yaml
+# Alternatively: WORKFLOWS=video_minimax_h3_r2v.json
+```
+
+MiniMax's editor JSON already contains `properties.models` with names, URLs and
+model directories. The generic loader reads these (also inside subgraphs).
+`minimax-h3.yaml` references that JSON without duplicating its model catalog.
+This selects five MiniMax assets and no LTX weights. For API JSONs without model
+metadata, use explicit model entries as in `ltx25.yaml`:
+
+```yaml
+version: 1
+workflows:
+  - my-api-workflow.json
+models:
+  - path: diffusion_models/my-model.safetensors
+    url: https://huggingface.co/org/repo/resolve/COMMIT/my-model.safetensors
+    # sha256: <64 hexadecimal characters>
+```
+
+Paths are relative to `COMFY_MODEL_ROOT`; any category or nested filename is
+supported. Model references ending in `.safetensors`, `.gguf`, `.ckpt`, `.pt`,
+`.pth`, or `.bin` must have download metadata. Other auxiliary files must be
+listed explicitly. Missing metadata fails before downloading anything.
+
+Editor JSON is used for **asset discovery only**. `handler.py` still requires
+an API-format graph in `input.workflow`; export it from ComfyUI for execution.
+The MiniMax reference images must also be supplied for actual inference.
+
+### Prepare once, reuse on every cold start
+
+When `/runpod-volume` exists, startup defaults to `/runpod-volume/models`;
+otherwise it uses `/comfyui/models`. An explicit `COMFY_MODEL_ROOT` overrides it.
+The generated extra-model-path configuration registers selected categories.
+
+- `PREPARE_MODELS_ONLY=true`: populate the cache and exit, without a GPU check,
+  ComfyUI or the Runpod handler. Use this in a separate preparation job/container.
+- `MODEL_DOWNLOAD_POLICY=missing` (default): download missing/stale assets.
+- `MODEL_DOWNLOAD_POLICY=cache-only`: require previously prepared cache entries;
+  fail immediately if any are absent/stale, with no model network calls.
+- `MODEL_DOWNLOAD_CONCURRENCY=4`: bounded parallel downloads (1–16).
+- `MODEL_DOWNLOAD_CHECK_ONLY=true`: print the selected checklist and exit,
+  without downloads or startup.
+
+Downloads use HTTPS, bounded retries, per-model file locks, temporary files and
+atomic replacement. Workers sharing a volume serialize downloads of the same
+asset; different assets can download concurrently. `HF_TOKEN` or
+`HUGGINGFACE_ACCESS_TOKEN` is sent only to Hugging Face.
+
+Successful preparation records source URL, optional SHA256, size and modification
+time in adjacent `.worker-cache.json` receipts. Subsequent starts compare metadata
+without rereading tens of GB to hash them. Changed URLs/checksums invalidate the
+receipt. Changed file size/mtime also invalidate it. This is a trusted-volume
+optimization, not tamper-proof verification. Files without receipts are adopted
+only during preparation; optional SHA256 is checked once. Use pinned revisions
+and SHA256 for integrity; `main` URLs cannot reveal upstream changes automatically.
+
+### Custom nodes remain build-time dependencies
+
+Core-node workflows such as the supplied MiniMax JSON need no custom-node install.
+For workflows that require extra packages, declare pinned dependencies in YAML:
+
+```yaml
+custom_nodes:
+  - name: ComfyUI-LTXVideo
+    repo: https://github.com/Lightricks/ComfyUI-LTXVideo.git
+    revision: ac4d99839020b983e956a8ab67ec38aec1b6e65a
+```
+
+Build with `--build-arg CUSTOM_NODE_MANIFESTS=ltx25.yaml` to include those selected
+dependencies. This does not select runtime workflows or download weights.
+A model/graph change needs no rebuild when using a mounted `WORKFLOW_DIR`; new
+Python/custom-node dependencies do require a compatible image. Manager stays offline.
+
+### Handler and Senai output
+
+Keep `OUTPUT_FORMAT=senai` explicit on Senai endpoints; it is not tied to a model.
+It returns `status: success` with media entries under `output`. For signed S3/R2
+URLs configure `AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+`AWS_ENDPOINT_URL` and `AWS_DEFAULT_REGION` (R2: `auto`). Senai must allow the
+storage hostname. Small outputs without a bucket are base64; Senai rejects them.
+Other callers retain the existing image response format by default.

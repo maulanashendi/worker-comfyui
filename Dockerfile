@@ -110,10 +110,12 @@ ADD src/extra_model_paths.yaml ./
 WORKDIR /
 
 # Install Python runtime dependencies for the handler
-RUN uv pip install runpod requests websocket-client
+COPY requirements.txt /requirements.txt
+RUN uv pip install -r /requirements.txt
 
 # Add application code and scripts
-ADD src/start.sh src/network_volume.py handler.py test_input.json ./
+ADD src/start.sh src/network_volume.py src/workflow_models.py src/media_output.py handler.py test_input.json ./
+COPY workflow/ /workflow/
 RUN chmod +x /start.sh
 
 # Add script to install custom nodes
@@ -130,6 +132,13 @@ RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 # Set the default command to run when starting the container
 CMD ["/start.sh"]
 
+# Optional custom-node dependencies, chosen by manifest at build time.
+# No workflow, model family or weights are selected by default.
+ARG CUSTOM_NODE_MANIFESTS=""
+COPY scripts/install-workflow-nodes.py /install-workflow-nodes.py
+RUN python /install-workflow-nodes.py --manifests "$CUSTOM_NODE_MANIFESTS"
+
+# Legacy opt-in targets used by existing release jobs; not built by default.
 # Stage 2: Download models
 FROM base AS downloader
 
@@ -180,7 +189,10 @@ RUN if [ "$MODEL_TYPE" = "z-image-turbo" ]; then \
     fi
 
 # Stage 3: Final image
-FROM base AS final
+FROM base AS baked-models
 
 # Copy models from stage 2 to the final image
 COPY --from=downloader /comfyui/models /comfyui/models
+
+# Default: generic worker with no model weights.
+FROM base AS final
