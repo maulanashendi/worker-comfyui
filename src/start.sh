@@ -11,7 +11,17 @@ else
 fi
 export COMFY_MODEL_ROOT="${COMFY_MODEL_ROOT:-$default_model_root}"
 export COMFY_PID_FILE="${COMFY_PID_FILE:-/tmp/comfyui.pid}"
-export REFRESH_WORKER="${REFRESH_WORKER:-true}"
+export REFRESH_WORKER="${REFRESH_WORKER:-dirty}"
+export SENAI_WORKER_STATE="${SENAI_WORKER_STATE:-/tmp/senai-worker-state.json}"
+export SENAI_BOOT_TIMELINE="${SENAI_BOOT_TIMELINE:-/tmp/senai-boot-timeline}"
+# Internal-only knob (not part of the senai-worker/1 contract env list): lets
+# tests shrink the handler grace period below without touching real deploys.
+SENAI_HANDLER_GRACE_SEC="${SENAI_HANDLER_GRACE_SEC:-30}"
+
+record_stage() {
+    printf '%s %s\n' "$1" "$(date +%s.%N)" >> "$SENAI_BOOT_TIMELINE"
+}
+record_stage start
 
 # A checklist is an explicit standalone mode: never start a worker without models.
 if [ "${MODEL_DOWNLOAD_CHECK_ONLY:-false}" = "true" ]; then
@@ -103,23 +113,51 @@ except Exception as e:
     exit 1
 fi
 echo "worker-comfyui: GPU available — $GPU_CHECK"
+record_stage gpu_check
 
-python3 "$WORKER_ROOT/workflow_models.py" &
-handler_pid=$!
-wait "$handler_pid"
-handler_pid=""
+# ---------------------------------------------------------------------------
+# Model stage
+# cache-only (production): verify only, never download.
+# missing (dev/bootstrap): download within a budget, then verify either way.
+# A worker with missing/mismatched models never crash-loops here — it starts
+# unready and lets the handler answer jobs with MODEL_CACHE_MISSING instead.
+# ---------------------------------------------------------------------------
+if [ "${MODEL_DOWNLOAD_POLICY:-cache-only}" != "cache-only" ]; then
+    python3 "$WORKER_ROOT/workflow_models.py" \
+        || echo "worker-comfyui: model download reported an issue; continuing in unready mode" >&2
+fi
+python3 "$WORKER_ROOT/workflow_models.py" --verify \
+    || echo "worker-comfyui: model verification reported an issue; continuing in unready mode" >&2
+record_stage model_verify
+
+whitelist_nodes=""
+if [ -f "$SENAI_WORKER_STATE" ]; then
+    whitelist_nodes="$(python3 -c "
+import json, sys
+try:
+    state = json.load(open(sys.argv[1]))
+    print(' '.join(state.get('custom_nodes') or []))
+except Exception:
+    pass
+" "$SENAI_WORKER_STATE" 2>/dev/null || true)"
+fi
 
 # Ensure ComfyUI-Manager runs in offline network mode inside the container
 comfy-manager-set-mode offline || echo "worker-comfyui - Could not set ComfyUI-Manager network_mode" >&2
 
 echo "worker-comfyui: Starting ComfyUI"
 
-# Allow operators to tweak verbosity; default is DEBUG.
-: "${COMFY_LOG_LEVEL:=DEBUG}"
+# Allow operators to tweak verbosity; default is INFO.
+: "${COMFY_LOG_LEVEL:=INFO}"
 
 comfy_args=(--disable-auto-launch --disable-metadata --verbose "$COMFY_LOG_LEVEL" --log-stdout)
 if [ -n "${WORKFLOWS:-${WORKFLOW_MANIFESTS:-}}" ]; then
     comfy_args+=(--extra-model-paths-config "${WORKFLOW_MODEL_PATHS:-/tmp/workflow_model_paths.yaml}")
+fi
+comfy_args+=(--disable-all-custom-nodes)
+if [ -n "$whitelist_nodes" ]; then
+    # shellcheck disable=SC2086 # word-split on purpose: one arg per node folder name
+    comfy_args+=(--whitelist-custom-nodes $whitelist_nodes)
 fi
 handler_args=()
 if [ "${SERVE_API_LOCALLY:-false}" = "true" ]; then
@@ -129,6 +167,7 @@ fi
 python -u "$COMFY_ROOT/main.py" "${comfy_args[@]}" &
 comfy_pid=$!
 echo "$comfy_pid" > "$COMFY_PID_FILE"
+record_stage comfy_start
 echo "worker-comfyui: Starting RunPod Handler"
 python -u "$WORKER_ROOT/handler.py" "${handler_args[@]}" "$@" &
 handler_pid=$!
@@ -137,5 +176,18 @@ handler_pid=$!
 status=0
 finished=""
 wait -n -p finished "$comfy_pid" "$handler_pid" || status=$?
-if [ "$finished" = "$comfy_pid" ] && [ "$status" = 0 ]; then status=1; fi
+if [ "$finished" = "$comfy_pid" ]; then
+    if [ "$status" = 0 ]; then status=1; fi
+    # ComfyUI died; give the handler a grace window to report an in-flight
+    # job as COMFYUI_CRASHED instead of killing it out from under the job.
+    (
+        sleep "$SENAI_HANDLER_GRACE_SEC"
+        kill -TERM "$handler_pid" 2>/dev/null || true
+    ) &
+    grace_pid=$!
+    wait "$handler_pid" 2>/dev/null || true
+    kill "$grace_pid" 2>/dev/null || true
+    wait "$grace_pid" 2>/dev/null || true
+    comfy_pid=""
+fi
 exit "$status"

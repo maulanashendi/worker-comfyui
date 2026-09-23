@@ -1,0 +1,644 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://senai.local/contracts/runpod-senai-worker/response.schema.json",
+  "title": "senai-worker/1 RunPod /status payload",
+  "type": "object",
+  "required": [
+    "id",
+    "status"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "IN_QUEUE",
+        "IN_PROGRESS",
+        "RUNNING",
+        "COMPLETED",
+        "FAILED",
+        "TIMED_OUT",
+        "CANCELLED"
+      ]
+    },
+    "delayTime": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "executionTime": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "workerId": {
+      "type": "string"
+    },
+    "error": {
+      "type": "string"
+    },
+    "output": {}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "output"
+        ],
+        "properties": {
+          "output": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/successOutput"
+              },
+              {
+                "$ref": "#/$defs/errorOutput"
+              },
+              {
+                "$ref": "#/$defs/healthyOutput"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "protocol": {
+      "const": "senai-worker/1"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "errorCode": {
+      "enum": [
+        "INVALID_ENVELOPE",
+        "UNSUPPORTED_PROTOCOL",
+        "EDITOR_FORMAT",
+        "NODE_NOT_ALLOWED",
+        "DEADLINE_PASSED",
+        "INPUT_HOST_REJECTED",
+        "INPUT_TOO_LARGE",
+        "INPUT_INVALID",
+        "INPUT_FETCH_FAILED",
+        "MODEL_NOT_IN_MANIFEST",
+        "MODEL_CACHE_MISSING",
+        "PROMPT_REJECTED",
+        "NODE_EXCEPTION",
+        "CUDA_OOM",
+        "NO_PROGRESS",
+        "EXECUTION_DEADLINE",
+        "COMFYUI_UNREACHABLE",
+        "COMFYUI_CRASHED",
+        "OUTPUT_EMPTY",
+        "UPLOAD_FAILED",
+        "OUTPUT_NOT_CONFIGURED",
+        "INTERNAL"
+      ]
+    },
+    "requestTraceEcho": {
+      "type": "object",
+      "required": [
+        "generation_id",
+        "attempt",
+        "binding_alias",
+        "binding_revision",
+        "adapter",
+        "workflow_id",
+        "graph_sha256"
+      ],
+      "properties": {
+        "generation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "binding_alias": {
+          "type": "string"
+        },
+        "binding_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "adapter": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "graph_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "workerIdentity": {
+      "type": "object",
+      "properties": {
+        "rp_job_id": {
+          "type": "string"
+        },
+        "worker_id": {
+          "type": "string"
+        },
+        "prompt_id": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "comfyui": {
+          "type": "string"
+        },
+        "workflows": {
+          "type": "string"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "gpu": {
+          "type": "string"
+        },
+        "cuda": {
+          "type": "string"
+        }
+      }
+    },
+    "successTrace": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/requestTraceEcho"
+        },
+        {
+          "$ref": "#/$defs/workerIdentity"
+        },
+        {
+          "required": [
+            "rp_job_id",
+            "worker_id",
+            "prompt_id",
+            "image",
+            "comfyui",
+            "workflows",
+            "manifest_sha256",
+            "gpu"
+          ]
+        }
+      ]
+    },
+    "errorTrace": {
+      "description": "Partial: absent fields mean the worker failed before it could know them (e.g. INVALID_ENVELOPE with an unparseable trace).",
+      "allOf": [
+        {
+          "$ref": "#/$defs/workerIdentity"
+        }
+      ]
+    },
+    "timings": {
+      "type": "object",
+      "properties": {
+        "cold": {
+          "type": "boolean"
+        },
+        "boot_age_sec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "boot_timeline": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "fetch_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "comfy_queue_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "execution_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "collect_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "upload_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputEntry": {
+      "type": "object",
+      "required": [
+        "url",
+        "bucket",
+        "key",
+        "filename",
+        "media_type",
+        "bytes",
+        "sha256"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "bucket": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+/[0-9]+/[0-9]{2}-.+$"
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^(image|video|audio)/[A-Za-z0-9.+-]+$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "duration_sec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "fps": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "has_audio": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "media_type": {
+                "pattern": "^video/"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "width",
+              "height",
+              "duration_sec",
+              "fps",
+              "has_audio"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "media_type": {
+                "pattern": "^image/"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "width",
+              "height"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "media_type": {
+                "pattern": "^audio/"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "duration_sec"
+            ]
+          }
+        }
+      ]
+    },
+    "successOutput": {
+      "type": "object",
+      "required": [
+        "status",
+        "protocol",
+        "outputs",
+        "trace",
+        "timings"
+      ],
+      "properties": {
+        "status": {
+          "const": "success"
+        },
+        "protocol": {
+          "$ref": "#/$defs/protocol"
+        },
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/outputEntry"
+          }
+        },
+        "trace": {
+          "$ref": "#/$defs/successTrace"
+        },
+        "timings": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/timings"
+            },
+            {
+              "required": [
+                "cold",
+                "execution_ms"
+              ]
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "error"
+            ]
+          },
+          {
+            "required": [
+              "refresh_worker"
+            ]
+          }
+        ]
+      }
+    },
+    "errorOutput": {
+      "type": "object",
+      "required": [
+        "status",
+        "protocol",
+        "failure"
+      ],
+      "properties": {
+        "status": {
+          "const": "error"
+        },
+        "protocol": {
+          "$ref": "#/$defs/protocol"
+        },
+        "failure": {
+          "type": "object",
+          "required": [
+            "type",
+            "code",
+            "stage",
+            "message",
+            "infra",
+            "retryable",
+            "gpu_work"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "validation_error",
+                "input_error",
+                "model_missing",
+                "prompt_rejected",
+                "execution_error",
+                "oom",
+                "timeout",
+                "comfyui_down",
+                "output_error",
+                "internal_error"
+              ]
+            },
+            "code": {
+              "$ref": "#/$defs/errorCode"
+            },
+            "stage": {
+              "enum": [
+                "boot",
+                "validate",
+                "fetch",
+                "preflight",
+                "submit",
+                "execute",
+                "collect",
+                "upload",
+                "internal"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "infra": {
+              "type": "boolean"
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "gpu_work": {
+              "type": "boolean"
+            },
+            "node_id": {
+              "type": "string"
+            },
+            "class_type": {
+              "type": "string"
+            },
+            "node_errors": {
+              "type": "object",
+              "maxProperties": 20
+            }
+          },
+          "additionalProperties": false
+        },
+        "trace": {
+          "$ref": "#/$defs/errorTrace"
+        },
+        "timings": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "additionalProperties": false,
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "error"
+            ]
+          },
+          {
+            "required": [
+              "refresh_worker"
+            ]
+          }
+        ]
+      }
+    },
+    "healthyOutput": {
+      "type": "object",
+      "required": [
+        "status",
+        "protocol",
+        "worker"
+      ],
+      "properties": {
+        "status": {
+          "const": "healthy"
+        },
+        "protocol": {
+          "$ref": "#/$defs/protocol"
+        },
+        "worker": {
+          "type": "object",
+          "required": [
+            "image",
+            "comfyui",
+            "workflows",
+            "manifest_sha256",
+            "gpu",
+            "cuda",
+            "vram_gb",
+            "ready",
+            "unready_code",
+            "models"
+          ],
+          "properties": {
+            "image": {
+              "type": "string"
+            },
+            "comfyui": {
+              "type": "string"
+            },
+            "workflows": {
+              "type": "string"
+            },
+            "manifest_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "gpu": {
+              "type": "string"
+            },
+            "cuda": {
+              "type": "string"
+            },
+            "vram_gb": {
+              "type": "number",
+              "minimum": 0
+            },
+            "ready": {
+              "type": "boolean"
+            },
+            "unready_code": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/errorCode"
+                }
+              ]
+            },
+            "models": {
+              "type": "object",
+              "required": [
+                "declared",
+                "present",
+                "missing",
+                "bytes_manifest",
+                "bytes_visible"
+              ],
+              "properties": {
+                "declared": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "present": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "bytes_manifest": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "bytes_visible": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "timings": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "additionalProperties": false,
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "error"
+            ]
+          },
+          {
+            "required": [
+              "refresh_worker"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

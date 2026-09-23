@@ -1,23 +1,40 @@
 # Source: Senai workflows; upstream vavo/LTX2.5-serverless@5e6a88f.
-version: 1
-workflows:
-  - ltx25-t2v-v1.json
-  - ltx25-i2v-v1.json
-  - ltx25-flf-v1.json
-models:
-  - path: text_encoders/gemma4_e2b_it_bf16.safetensors
-    url: https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e2b_it_bf16.safetensors
-  - path: diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
-    url: https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
-  - path: vae/ltx-2.5-video-vae-bf16.safetensors
-    url: https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors
-  - path: vae/ltx-2.5-audio-vae-bf16.safetensors
-    url: https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors
-  - path: text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
-    url: https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
-  - path: latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors
-    url: https://huggingface.co/Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors
+version: 2
+set: ltx25
+requires_comfyui: ">=0.36.0"
 custom_nodes:
   - name: ComfyUI-LTXVideo
     repo: https://github.com/Lightricks/ComfyUI-LTXVideo.git
     revision: ac4d99839020b983e956a8ab67ec38aec1b6e65a
+workflows:
+  - ltx25-t2v-v1.json
+  - ltx25-i2v-v1.json
+  - ltx25-flf-v1.json
+allowed_class_types_extra: []
+limits: {no_progress_sec: 120, no_progress_load_sec: 600, execution_ceiling_sec: 1800}
+warmup_graph: null
+models:
+  - path: text_encoders/gemma4_e2b_it_bf16.safetensors
+    hf: {repo: Comfy-Org/gemma-4, revision: main, file: text_encoders/gemma4_e2b_it_bf16.safetensors}
+    sha256: null
+    bytes: 0
+  - path: diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+    hf: {repo: Lightricks/LTX-2.5, revision: main, file: diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors}
+    sha256: null
+    bytes: 0
+  - path: vae/ltx-2.5-video-vae-bf16.safetensors
+    hf: {repo: Lightricks/LTX-2.5, revision: main, file: vae/ltx-2.5-video-vae-bf16.safetensors}
+    sha256: null
+    bytes: 0
+  - path: vae/ltx-2.5-audio-vae-bf16.safetensors
+    hf: {repo: Lightricks/LTX-2.5, revision: main, file: vae/ltx-2.5-audio-vae-bf16.safetensors}
+    sha256: null
+    bytes: 0
+  - path: text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+    hf: {repo: Lightricks/LTX-2.5, revision: main, file: text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors}
+    sha256: null
+    bytes: 0
+  - path: latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors
+    hf: {repo: Lightricks/LTX-2.5, revision: main, file: latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors}
+    sha256: null
+    bytes: 0

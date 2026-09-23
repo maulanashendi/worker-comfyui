@@ -14,11 +14,15 @@ import tempfile
 import socket
 import traceback
 import logging
+from pathlib import Path
 
 from network_volume import (
     is_network_volume_debug_enabled,
     run_network_volume_diagnostics,
 )
+import comfy_client
+import senai_worker
+from senai_errors import PROTOCOL as SENAI_PROTOCOL, WorkerError
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -55,9 +59,13 @@ if os.environ.get("WEBSOCKET_TRACE", "false").lower() == "true":
 
 # Host where ComfyUI is running
 COMFY_HOST = "127.0.0.1:8188"
-# Enforce a clean state after each job is done
-# see https://docs.runpod.io/docs/handler-additional-controls#refresh-worker
-REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "true").lower() == "true"
+# Enforce a clean state after each job is done (legacy upstream path only; the
+# senai-worker/1 path computes its own refresh_worker via REFRESH_WORKER
+# dirty|always|never, see senai_worker._apply_refresh).
+REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "dirty") == "always"
+
+COMFY_CLIENT = comfy_client.ComfyClient(f"http://{COMFY_HOST}")
+_BOOT_STATE = None
 
 # ---------------------------------------------------------------------------
 # Model loader nodes — used for pre-flight validation of workflow model refs
@@ -997,10 +1005,6 @@ def _handle_job(job):
                 errors.append(warning_msg)
 
         print(f"worker-comfyui - Processing {len(outputs)} output nodes...")
-        if os.getenv("OUTPUT_FORMAT") == "senai":
-            from media_output import collect_senai_outputs
-            return collect_senai_outputs(outputs, job_id, get_image_data, errors)
-
         for node_id, node_output in outputs.items():
             node_output = dict(node_output)
             node_output["images"] = [
@@ -1154,19 +1158,63 @@ def _handle_job(job):
 
 
 def handler(job):
-    """Return results before asking Runpod to retire this worker, on every path."""
-    try:
-        result = _handle_job(job)
-    except Exception:
-        logger.exception("Unhandled job failure")
-        result = {"error": "Unexpected job failure"}
-    if os.getenv("OUTPUT_FORMAT") == "senai" and "error" in result:
-        result["status"] = "error"
-    if REFRESH_WORKER:
-        result["refresh_worker"] = True
-    return result
+    """Return results before asking Runpod to retire this worker, on every path.
+
+    Dispatches on input.protocol: senai-worker/1 requests go through
+    senai_worker.run_job; requests without a protocol fall back to the legacy
+    upstream handler only when LEGACY_UPSTREAM_INPUT=true; anything else is
+    rejected with UNSUPPORTED_PROTOCOL. No exception ever escapes this
+    function on any branch.
+    """
+    job_input = job.get("input")
+    protocol = job_input.get("protocol") if isinstance(job_input, dict) else None
+
+    if protocol is not None:
+        try:
+            if protocol != SENAI_PROTOCOL:
+                return {
+                    "status": "error",
+                    "protocol": SENAI_PROTOCOL,
+                    "failure": WorkerError(
+                        "UNSUPPORTED_PROTOCOL", f"unsupported protocol: {protocol!r}"
+                    ).to_error(),
+                }
+            return senai_worker.run_job(job, boot_state=_BOOT_STATE, comfy=COMFY_CLIENT)
+        except Exception:
+            logger.exception("Unhandled senai-worker/1 job failure")
+            return {
+                "status": "error",
+                "protocol": SENAI_PROTOCOL,
+                "failure": WorkerError("INTERNAL", "unexpected error in senai dispatch").to_error(),
+                "refresh_worker": True,
+            }
+
+    if os.environ.get("LEGACY_UPSTREAM_INPUT", "false").lower() == "true":
+        try:
+            result = _handle_job(job)
+        except Exception:
+            logger.exception("Unhandled job failure")
+            result = {"error": "Unexpected job failure"}
+        if REFRESH_WORKER:
+            result["refresh_worker"] = True
+        return result
+
+    return {
+        "status": "error",
+        "protocol": SENAI_PROTOCOL,
+        "failure": WorkerError(
+            "UNSUPPORTED_PROTOCOL",
+            "request is missing input.protocol and LEGACY_UPSTREAM_INPUT is not enabled",
+        ).to_error(),
+    }
 
 
 if __name__ == "__main__":
     print("worker-comfyui - Starting handler...")
+    _BOOT_STATE = senai_worker.boot(
+        state_path=Path(os.environ.get("SENAI_WORKER_STATE", "/tmp/senai-worker-state.json")),
+        timeline_path=Path(os.environ.get("SENAI_BOOT_TIMELINE", "/tmp/senai-boot-timeline")),
+        comfy=COMFY_CLIENT,
+        ready_timeout_sec=float(os.environ.get("COMFY_READY_TIMEOUT_SEC", "300")),
+    )
     runpod.serverless.start({"handler": handler})

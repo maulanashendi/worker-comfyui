@@ -144,13 +144,22 @@ WORKFLOWS=minimax-h3.yaml
 MODEL_DOWNLOAD_POLICY=cache-only
 COMFY_MODEL_ROOT=/runpod-volume/models
 REFRESH_WORKER=true
-# For Senai consumers, plus AWS storage credentials:
-OUTPUT_FORMAT=senai
 ```
 
 Switch to `WORKFLOWS=ltx25.yaml` for LTX after preparing its cache and ensuring
 its node dependencies are installed. Mounted workflow definitions can change
 without a rebuild. Select only workflows the endpoint actually serves.
+
+> [!NOTE]
+> The manual network-volume preparation above is the generic path for a
+> self-managed cache. **Senai's production endpoints do not use it.** They
+> select `Lightricks/LTX-2.5` + `Comfy-Org/gemma-4` (LTX set) or
+> `Comfy-Org/MiniMax-H3` + `Comfy-Org/SDPose` (H3 set) as RunPod's native
+> Hugging Face **cached models** on the template, and the worker reads them
+> from `HF_CACHE_ROOT` at boot — see
+> [Configuration Guide](configuration.md#senai-worker1-protocol) for the full
+> env list, the `senai-worker/1` protocol, and the unready-boot behavior when
+> a cached model or `AWS_BUCKET_NAME` is missing.
 
 `cache-only` removes download and whole-file hashing from cold start, but does
 not remove image pull, Python/ComfyUI initialization or model-to-GPU loading.

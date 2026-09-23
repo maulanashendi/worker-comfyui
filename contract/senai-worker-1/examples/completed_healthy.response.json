@@ -1,0 +1,37 @@
+{
+  "id": "sync-0a0a-health",
+  "status": "COMPLETED",
+  "delayTime": 35011,
+  "executionTime": 88,
+  "output": {
+    "status": "healthy",
+    "protocol": "senai-worker/1",
+    "worker": {
+      "image": "docker.io/maulanashendi/worker-comfyui:senai-0.1.0@sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "comfyui": "v0.36.0",
+      "workflows": "minimax-h3.yaml",
+      "manifest_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "gpu": "NVIDIA L40S",
+      "cuda": "12.8",
+      "vram_gb": 48,
+      "ready": false,
+      "unready_code": "MODEL_CACHE_MISSING",
+      "models": {
+        "declared": 8,
+        "present": 7,
+        "missing": [
+          "model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors"
+        ],
+        "bytes_manifest": 48747878810,
+        "bytes_visible": 46000000000
+      }
+    },
+    "timings": {
+      "boot_age_sec": 35.2,
+      "boot_timeline": {
+        "gpu_check": 2.9,
+        "model_verify": 3.0
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "input": {
+    "protocol": "senai-worker/1",
+    "workflow": {
+      "395": {
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "start.png"
+        }
+      },
+      "398:376": {
+        "class_type": "PrimitiveStringMultiline",
+        "inputs": {
+          "value": "a lighthouse at dusk, waves"
+        }
+      },
+      "75": {
+        "class_type": "SaveVideo",
+        "inputs": {
+          "filename_prefix": "video/LTX-2.5_i2v",
+          "format": "auto",
+          "codec": "auto",
+          "video": [
+            "398:350",
+            0
+          ]
+        }
+      }
+    },
+    "inputs": [
+      {
+        "name": "start.png",
+        "data": "data:image/png;base64,iVBORw0KGgo=",
+        "media_type": "image/png"
+      }
+    ],
+    "trace": {
+      "generation_id": "0f7f5a52-3a4c-4d53-9d6e-2b8f3c1a7e10",
+      "attempt": 1,
+      "binding_alias": "ltx25-self",
+      "binding_revision": 1,
+      "adapter": "ltx25_senai_worker_v1",
+      "workflow_id": "ltx25-i2v-v1",
+      "graph_sha256": "be0ee529599ea4754d7d7612bb709b5e6b7f2101c8cc1780f6632255e9d6bfcc"
+    },
+    "limits": {
+      "deadline_at": "2026-09-23T10:35:00Z",
+      "no_progress_sec": 120,
+      "no_progress_load_sec": 600
+    }
+  },
+  "policy": {
+    "executionTimeout": 1200000,
+    "ttl": 1800000
+  }
+}

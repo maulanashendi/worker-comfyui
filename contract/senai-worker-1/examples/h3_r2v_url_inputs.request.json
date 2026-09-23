@@ -1,0 +1,80 @@
+{
+  "input": {
+    "protocol": "senai-worker/1",
+    "workflow": {
+      "137": {
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "ref_image_0.png"
+        }
+      },
+      "150": {
+        "class_type": "LoadVideo",
+        "inputs": {
+          "file": "ref_video_0.mp4"
+        }
+      },
+      "136": {
+        "class_type": "MiniMaxH3ReferenceToVideo",
+        "inputs": {
+          "prompt": "<Picture 1> walks like <Video 1>",
+          "width": 1344,
+          "height": 768,
+          "length": 124,
+          "ref_image_size": "match",
+          "clip": [
+            "128",
+            0
+          ],
+          "ref_images.ref_image_0": [
+            "137",
+            0
+          ]
+        }
+      },
+      "92": {
+        "class_type": "SaveVideo",
+        "inputs": {
+          "filename_prefix": "video/MiniMax_H3",
+          "format": "auto",
+          "codec": "auto",
+          "video": [
+            "140",
+            0
+          ]
+        }
+      }
+    },
+    "inputs": [
+      {
+        "name": "ref_image_0.png",
+        "url": "https://acct.r2.cloudflarestorage.com/senai-assets/u/1/ref.png?X-Amz-Signature=abc",
+        "media_type": "image/png",
+        "bytes": 812345
+      },
+      {
+        "name": "ref_video_0.mp4",
+        "url": "https://acct.r2.cloudflarestorage.com/senai-assets/u/1/ref.mp4?X-Amz-Signature=def",
+        "media_type": "video/mp4",
+        "bytes": 4100000,
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    ],
+    "trace": {
+      "generation_id": "9a1d2c4e-5b6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "attempt": 2,
+      "binding_alias": "mnx-h3",
+      "binding_revision": 3,
+      "adapter": "minimax_h3_senai_worker_v1",
+      "workflow_id": "minimax-h3-r2v-v1",
+      "graph_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "limits": {
+      "deadline_at": "2026-09-23T11:05:00Z"
+    }
+  },
+  "policy": {
+    "executionTimeout": 1500000,
+    "ttl": 2100000
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://senai.local/contracts/runpod-senai-worker/request.schema.json",
+  "title": "senai-worker/1 RunPod /run body",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["input", "policy"],
+      "properties": {
+        "input": {"$ref": "#/$defs/workflowInput"},
+        "policy": {"$ref": "#/$defs/policy"}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["input"],
+      "properties": {
+        "input": {"$ref": "#/$defs/healthInput"},
+        "policy": {"$ref": "#/$defs/policy"}
+      },
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "protocol": {"const": "senai-worker/1"},
+    "policy": {
+      "type": "object",
+      "required": ["executionTimeout", "ttl"],
+      "properties": {
+        "executionTimeout": {"type": "integer", "minimum": 1000},
+        "ttl": {"type": "integer", "minimum": 1000}
+      },
+      "additionalProperties": false
+    },
+    "healthInput": {
+      "type": "object",
+      "required": ["protocol", "health_check"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/protocol"},
+        "health_check": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "workflowInput": {
+      "type": "object",
+      "required": ["protocol", "workflow", "trace", "limits"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/protocol"},
+        "workflow": {"$ref": "#/$defs/apiGraph"},
+        "inputs": {"type": "array", "items": {"$ref": "#/$defs/inputItem"}},
+        "trace": {"$ref": "#/$defs/requestTrace"},
+        "limits": {"$ref": "#/$defs/limits"}
+      },
+      "additionalProperties": false
+    },
+    "apiGraph": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[0-9A-Za-z:_-]+$"},
+      "additionalProperties": {
+        "type": "object",
+        "required": ["class_type", "inputs"],
+        "properties": {
+          "class_type": {"type": "string", "minLength": 1},
+          "inputs": {"type": "object"},
+          "_meta": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "inputItem": {
+      "type": "object",
+      "required": ["name", "media_type"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*$", "maxLength": 128},
+        "media_type": {"type": "string", "pattern": "^(image|video|audio)/[A-Za-z0-9.+-]+$"},
+        "url": {"type": "string", "pattern": "^https://"},
+        "data": {"type": "string", "minLength": 1},
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {"required": ["url"], "not": {"required": ["data"]}},
+        {"required": ["data"], "not": {"required": ["url"]}}
+      ],
+      "if": {"required": ["data"]},
+      "then": {"properties": {"media_type": {"pattern": "^image/"}}}
+    },
+    "requestTrace": {
+      "type": "object",
+      "required": ["generation_id", "attempt", "binding_alias", "binding_revision", "adapter", "workflow_id", "graph_sha256"],
+      "properties": {
+        "generation_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "attempt": {"type": "integer", "minimum": 1},
+        "binding_alias": {"type": "string", "minLength": 1},
+        "binding_revision": {"type": "integer", "minimum": 0},
+        "adapter": {"type": "string", "minLength": 1},
+        "workflow_id": {"type": "string", "minLength": 1},
+        "graph_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "required": ["deadline_at"],
+      "properties": {
+        "deadline_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"},
+        "no_progress_sec": {"type": "integer", "minimum": 1},
+        "no_progress_load_sec": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    }
+  }
+}
