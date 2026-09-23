@@ -1,0 +1,136 @@
+# Machine-checkable pins for the runpod-senai-worker contract.
+# Human-readable rationale lives in CONTRACT.md — this file is the numbers only.
+
+contract_version: "0.2.1"
+protocol: "senai-worker/1"
+
+producer:
+  repo: "maulanashendi/worker-comfyui"
+  upstream: "runpod-workers/worker-comfyui"
+  base_commit: "094dbbe13810e2cc7bc5ca6a22beb892362082d5"
+  branch: "feat/senai-pipeline"
+  revision: null          # filled with the commit that is built into the G3 image
+  image: null             # "<registry>/<repo>:<tag>@sha256:<digest>", filled at G3
+  comfyui_version: "v0.36.0"
+  verified_at: null       # set when G5/G7 pass; contract becomes 1.0.0
+
+runtime:
+  min_vram_gb: 48         # K2 (user decision 2026-09-23)
+  network_volume: false   # K1: weights from Hugging Face cached models
+  verified: false
+
+adapters:
+  - name: "ltx25_senai_worker_v1"
+    set: "ltx25.yaml"
+    workflows: ["ltx25-t2v-v1", "ltx25-i2v-v1", "ltx25-flf-v1"]
+  - name: "minimax_h3_senai_worker_v1"
+    set: "minimax-h3.yaml"
+    workflows: ["minimax-h3-r2v-v1", "minimax-h3-motion-v1"]
+
+sets:
+  - manifest: "ltx25.yaml"
+    model_references:     # RunPod cached models; revision pinned to a commit at G4
+      - {repo: "Lightricks/LTX-2.5", revision: null}
+      - {repo: "Comfy-Org/gemma-4", revision: null}
+  - manifest: "minimax-h3.yaml"
+    model_references:
+      - {repo: "Comfy-Org/MiniMax-H3", revision: null}
+      - {repo: "Comfy-Org/SDPose", revision: null}
+
+# Canonical sha256 of every graph senai sends through this protocol.
+# Algorithm: sha256(json.dumps(d, sort_keys=True, separators=(',', ':')).encode())
+workflows:
+  - id: "ltx25-t2v-v1"
+    path: "backend/src/senai/modules/providers/runpod/workflows/ltx25-t2v-v1.json"
+    sha256_canonical: "9f35e983796ddeacdd4403fc86980a7ff311f4509b4183be6dfffde2897bfddc"
+    status: "pinned"      # same graph as contracts/runpod-ltx25/pins.yaml
+  - id: "ltx25-i2v-v1"
+    path: "backend/src/senai/modules/providers/runpod/workflows/ltx25-i2v-v1.json"
+    sha256_canonical: "be0ee529599ea4754d7d7612bb709b5e6b7f2101c8cc1780f6632255e9d6bfcc"
+    status: "pinned"
+  - id: "ltx25-flf-v1"
+    path: "backend/src/senai/modules/providers/runpod/workflows/ltx25-flf-v1.json"
+    sha256_canonical: "b7706a3d5e0736b5e5459a21b99b928f9676bbf01a1fb86377b0d7451856537d"
+    status: "pinned"
+  - id: "minimax-h3-r2v-v1"
+    path: "backend/src/senai/modules/providers/runpod/workflows/minimax-h3-r2v-v1.json"
+    node_count: 26
+    sha256_canonical: "8e4c023f10dcea31348aefcd36815b68bbceaa0db7a7152c3cc62c749d362a88"
+    status: "pinned"
+    source_template: "video_minimax_h3_r2v"
+    exported_with: "ComfyUI 0.36.0, frontend 1.52.7, templates 0.11.62, app.graphToPrompt().output (2026-09-23)"
+  - id: "minimax-h3-motion-v1"
+    path: "backend/src/senai/modules/providers/runpod/workflows/minimax-h3-motion-v1.json"
+    node_count: 37
+    sha256_canonical: "8e4106bce0f1af6cf60d7a99355906af846536be4b5f7da87d91d8e01b104b94"
+    status: "pinned"
+    source_template: "video_minimax_h3_fun_controlnet_union"
+    exported_with: "ComfyUI 0.36.0, frontend 1.52.7, templates 0.11.62, app.graphToPrompt().output (2026-09-23)"
+
+output:
+  error_object_key: "failure"      # `error` and `refresh_worker` are popped by the RunPod SDK
+  sdk_reserved_keys: ["error", "refresh_worker"]
+  key_template: "{OUTPUT_PREFIX}/{generation_id}/{attempt}/{NN:02d}-{filename}"
+  presign_ttl_default_sec: 86400
+  base64_allowed: false
+
+# Must match CONTRACT.md §5 exactly (enforced by backend/tests/contracts/test_runpod_senai_worker_contract.py).
+error_codes:
+  INVALID_ENVELOPE:      {type: validation_error, stage: validate,  gpu_work: false, infra: false, retryable: false, refresh: false}
+  UNSUPPORTED_PROTOCOL:  {type: validation_error, stage: validate,  gpu_work: false, infra: false, retryable: false, refresh: false}
+  EDITOR_FORMAT:         {type: validation_error, stage: validate,  gpu_work: false, infra: false, retryable: false, refresh: false}
+  NODE_NOT_ALLOWED:      {type: validation_error, stage: validate,  gpu_work: false, infra: false, retryable: false, refresh: false}
+  DEADLINE_PASSED:       {type: validation_error, stage: validate,  gpu_work: false, infra: false, retryable: false, refresh: false}
+  INPUT_HOST_REJECTED:   {type: input_error,      stage: fetch,     gpu_work: false, infra: false, retryable: false, refresh: false}
+  INPUT_TOO_LARGE:       {type: input_error,      stage: fetch,     gpu_work: false, infra: false, retryable: false, refresh: false}
+  INPUT_INVALID:         {type: input_error,      stage: fetch,     gpu_work: false, infra: false, retryable: false, refresh: false}
+  INPUT_FETCH_FAILED:    {type: input_error,      stage: fetch,     gpu_work: false, infra: false, retryable: false, refresh: false}
+  MODEL_NOT_IN_MANIFEST: {type: model_missing,    stage: preflight, gpu_work: false, infra: false, retryable: false, refresh: false}
+  MODEL_CACHE_MISSING:   {type: model_missing,    stage: boot,      gpu_work: false, infra: true,  retryable: false, refresh: false}
+  PROMPT_REJECTED:       {type: prompt_rejected,  stage: submit,    gpu_work: false, infra: false, retryable: false, refresh: false}
+  NODE_EXCEPTION:        {type: execution_error,  stage: execute,   gpu_work: true,  infra: false, retryable: false, refresh: false}
+  CUDA_OOM:              {type: oom,              stage: execute,   gpu_work: true,  infra: true,  retryable: true,  refresh: true}
+  NO_PROGRESS:           {type: timeout,          stage: execute,   gpu_work: true,  infra: true,  retryable: true,  refresh: true}
+  EXECUTION_DEADLINE:    {type: timeout,          stage: execute,   gpu_work: true,  infra: true,  retryable: false, refresh: true}
+  COMFYUI_UNREACHABLE:   {type: comfyui_down,     stage: boot,      gpu_work: false, infra: true,  retryable: true,  refresh: true}
+  COMFYUI_CRASHED:       {type: comfyui_down,     stage: execute,   gpu_work: true,  infra: true,  retryable: true,  refresh: true}
+  OUTPUT_EMPTY:          {type: output_error,     stage: collect,   gpu_work: true,  infra: false, retryable: false, refresh: false}
+  UPLOAD_FAILED:         {type: output_error,     stage: upload,    gpu_work: true,  infra: true,  retryable: true,  refresh: false}
+  OUTPUT_NOT_CONFIGURED: {type: internal_error,   stage: boot,      gpu_work: false, infra: true,  retryable: false, refresh: false}
+  INTERNAL:              {type: internal_error,   stage: internal,  gpu_work: true,  infra: true,  retryable: false, refresh: true}
+
+# Outer RunPod statuses mapped by senai (CONTRACT.md §6.1) that carry retry/infra meaning.
+runpod_status_codes:
+  PROVIDER_FAILED:  {infra: true, retryable: true}
+  PROVIDER_TIMEOUT: {infra: true, retryable: false}
+
+env:
+  # existing in the fork at base_commit
+  - {key: WORKFLOWS, required: true, note: "set selector, comma list of workflow/<set>.yaml"}
+  - {key: MODEL_DOWNLOAD_POLICY, default: "cache-only", production_value: "cache-only", note: "senai-worker default; the upstream fork defaulted to missing (downloads at boot)"}
+  - {key: HF_TOKEN, default: "", note: "read token; required on the endpoint for gated repos (Lightricks/LTX-2.5). Also accepted as HUGGINGFACE_ACCESS_TOKEN"}
+  - {key: PREPARE_MODELS_ONLY, default: "false"}
+  - {key: MODEL_DOWNLOAD_CHECK_ONLY, default: "false"}
+  - {key: COMFY_MODEL_ROOT, default: "/runpod-volume/models if mounted, else /comfyui/models"}
+  - {key: COMFY_LOG_LEVEL, default: "INFO", note: "fork default was DEBUG"}
+  - {key: AWS_BUCKET_NAME, required: true}
+  - {key: AWS_ACCESS_KEY_ID, required: true}
+  - {key: AWS_SECRET_ACCESS_KEY, required: true}
+  - {key: AWS_DEFAULT_REGION, required: true, production_value: "auto"}
+  - {key: AWS_ENDPOINT_URL, required: true, note: "R2 endpoint, same as vavo endpoint"}
+  # new in senai-worker/1
+  - {key: HF_CACHE_ROOT, default: "/runpod-volume/huggingface-cache/hub"}
+  - {key: REFRESH_WORKER, default: "dirty", allowed: ["dirty", "always", "never"]}
+  - {key: LEGACY_UPSTREAM_INPUT, default: "false"}
+  - {key: INPUT_ALLOWED_HOSTS, default: "", note: "empty rejects every url input"}
+  - {key: INPUT_MAX_BYTES, default: "209715200"}
+  - {key: INPUT_INLINE_MAX_BYTES, default: "8388608"}
+  - {key: OUTPUT_PREFIX, default: "renders"}
+  - {key: OUTPUT_PRESIGN_TTL_SEC, default: "86400"}
+  - {key: JOB_DEADLINE_CEILING_SEC, default: "1800"}
+  - {key: NO_PROGRESS_SEC, default: "120"}
+  - {key: NO_PROGRESS_LOAD_SEC, default: "600"}
+  - {key: COMFY_READY_TIMEOUT_SEC, default: "300"}
+  - {key: MODEL_DOWNLOAD_BUDGET_SEC, default: "1800", note: "only used with MODEL_DOWNLOAD_POLICY=missing"}
+  - {key: MODEL_LOCK_TIMEOUT_SEC, default: "600"}
+  - {key: WARMUP, default: "false"}

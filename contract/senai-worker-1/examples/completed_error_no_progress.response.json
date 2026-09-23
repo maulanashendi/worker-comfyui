@@ -1,0 +1,47 @@
+{
+  "id": "sync-9c2b-1f0e-e1",
+  "status": "COMPLETED",
+  "delayTime": 1200,
+  "executionTime": 131002,
+  "workerId": "p3n8v5t2wxyz",
+  "output": {
+    "status": "error",
+    "protocol": "senai-worker/1",
+    "trace": {
+      "generation_id": "9a1d2c4e-5b6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "attempt": 2,
+      "binding_alias": "mnx-h3",
+      "binding_revision": 3,
+      "adapter": "minimax_h3_senai_worker_v1",
+      "workflow_id": "minimax-h3-r2v-v1",
+      "graph_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "rp_job_id": "sync-9c2b-1f0e-e1",
+      "worker_id": "p3n8v5t2wxyz",
+      "prompt_id": "a4b1c2d3-0000-4000-8000-000000000001",
+      "image": "docker.io/maulanashendi/worker-comfyui:senai-0.1.0@sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "comfyui": "v0.36.0",
+      "workflows": "minimax-h3.yaml",
+      "manifest_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "gpu": "NVIDIA L40S",
+      "cuda": "12.8"
+    },
+    "timings": {
+      "cold": false,
+      "boot_age_sec": 812.0,
+      "fetch_ms": 1830,
+      "comfy_queue_ms": 3,
+      "execution_ms": 129100
+    },
+    "failure": {
+      "type": "timeout",
+      "code": "NO_PROGRESS",
+      "stage": "execute",
+      "message": "no progress for 120s at node 136 (MiniMaxH3ReferenceToVideo)",
+      "infra": true,
+      "retryable": true,
+      "gpu_work": true,
+      "node_id": "136",
+      "class_type": "MiniMaxH3ReferenceToVideo"
+    }
+  }
+}

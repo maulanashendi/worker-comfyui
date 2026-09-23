@@ -1,0 +1,62 @@
+{
+  "id": "sync-3e1f-7d2a-e2",
+  "status": "COMPLETED",
+  "delayTime": 93012,
+  "executionTime": 81340,
+  "workerId": "k7x2m9q1abcd",
+  "output": {
+    "status": "success",
+    "protocol": "senai-worker/1",
+    "outputs": [
+      {
+        "url": "https://acct.r2.cloudflarestorage.com/senai-staging/renders/0f7f5a52-3a4c-4d53-9d6e-2b8f3c1a7e10/1/00-LTX-2.5_i2v_00001_.mp4?X-Amz-Signature=ghi",
+        "bucket": "senai-staging",
+        "key": "renders/0f7f5a52-3a4c-4d53-9d6e-2b8f3c1a7e10/1/00-LTX-2.5_i2v_00001_.mp4",
+        "filename": "LTX-2.5_i2v_00001_.mp4",
+        "node_id": "75",
+        "media_type": "video/mp4",
+        "bytes": 6123456,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "width": 1280,
+        "height": 704,
+        "duration_sec": 5.04,
+        "fps": 24.0,
+        "has_audio": true
+      }
+    ],
+    "trace": {
+      "generation_id": "0f7f5a52-3a4c-4d53-9d6e-2b8f3c1a7e10",
+      "attempt": 1,
+      "binding_alias": "ltx25-self",
+      "binding_revision": 1,
+      "adapter": "ltx25_senai_worker_v1",
+      "workflow_id": "ltx25-i2v-v1",
+      "graph_sha256": "be0ee529599ea4754d7d7612bb709b5e6b7f2101c8cc1780f6632255e9d6bfcc",
+      "rp_job_id": "sync-3e1f-7d2a-e2",
+      "worker_id": "k7x2m9q1abcd",
+      "prompt_id": "a4b1c2d3-0000-4000-8000-000000000001",
+      "image": "docker.io/maulanashendi/worker-comfyui:senai-0.1.0@sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "comfyui": "v0.36.0",
+      "workflows": "ltx25.yaml",
+      "manifest_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "gpu": "NVIDIA L40S",
+      "cuda": "12.8"
+    },
+    "timings": {
+      "cold": true,
+      "boot_age_sec": 44.7,
+      "boot_timeline": {
+        "gpu_check": 3.1,
+        "model_verify": 3.2,
+        "comfy_start": 21.9,
+        "ready": 27.4,
+        "serverless_start": 27.5
+      },
+      "fetch_ms": 12,
+      "comfy_queue_ms": 4,
+      "execution_ms": 78811,
+      "collect_ms": 210,
+      "upload_ms": 1450
+    }
+  }
+}

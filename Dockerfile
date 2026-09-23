@@ -5,7 +5,7 @@ ARG BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 FROM ${BASE_IMAGE} AS base
 
 # Build arguments for this stage with sensible defaults for standalone builds
-ARG COMFYUI_VERSION=0.34.0
+ARG COMFYUI_VERSION=0.36.0
 ARG CUDA_VERSION_FOR_COMFY=12.8
 ARG ENABLE_PYTORCH_UPGRADE=false
 ARG PYTORCH_INDEX_URL
@@ -106,6 +106,11 @@ WORKDIR /comfyui
 # Support for the network volume
 ADD src/extra_model_paths.yaml ./
 
+# Image identity, reported by the handler as trace.image (senai-worker/1 §5/§8).
+ARG SENAI_IMAGE_REF=""
+ENV SENAI_IMAGE_REF="${SENAI_IMAGE_REF}"
+RUN echo "${COMFYUI_VERSION}" > /etc/senai-comfyui-version
+
 # Go back to the root
 WORKDIR /
 
@@ -114,7 +119,9 @@ COPY requirements.txt /requirements.txt
 RUN uv pip install -r /requirements.txt
 
 # Add application code and scripts
-ADD src/start.sh src/network_volume.py src/workflow_models.py src/media_output.py handler.py test_input.json ./
+ADD src/start.sh src/network_volume.py src/workflow_models.py src/media_output.py \
+    src/senai_worker.py src/senai_errors.py src/comfy_client.py src/guard.py \
+    handler.py test_input.json ./
 COPY workflow/ /workflow/
 RUN chmod +x /start.sh
 

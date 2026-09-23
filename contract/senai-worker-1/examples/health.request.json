@@ -1,0 +1,10 @@
+{
+  "input": {
+    "protocol": "senai-worker/1",
+    "health_check": true
+  },
+  "policy": {
+    "executionTimeout": 60000,
+    "ttl": 300000
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "id": "sync-dead-beef-e1",
+  "status": "FAILED",
+  "delayTime": 1500,
+  "executionTime": 44000,
+  "error": "worker exited unexpectedly"
+}

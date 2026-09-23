@@ -14,6 +14,14 @@ variable "COMFYUI_VERSION" {
   default = "0.34.0"
 }
 
+variable "SENAI_COMFYUI_VERSION" {
+  default = "0.36.0"
+}
+
+variable "SENAI_IMAGE_REF" {
+  default = ""
+}
+
 # Global defaults for standard CUDA 12.8.1 images
 variable "BASE_IMAGE" {
   default = "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
@@ -157,6 +165,23 @@ target "z-image-turbo" {
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-z-image-turbo"]
   inherits = ["base"]
+}
+
+target "senai" {
+  context = "."
+  dockerfile = "Dockerfile"
+  target = "final"
+  platforms = ["linux/amd64"]
+  args = {
+    BASE_IMAGE = "${BASE_IMAGE}"
+    COMFYUI_VERSION = "${SENAI_COMFYUI_VERSION}"
+    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
+    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
+    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
+    CUSTOM_NODE_MANIFESTS = "ltx25.yaml"
+    SENAI_IMAGE_REF = "${SENAI_IMAGE_REF}"
+  }
+  tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-senai"]
 }
 
 target "base-cuda12-8-1" {

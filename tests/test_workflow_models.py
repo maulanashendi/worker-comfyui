@@ -1,7 +1,10 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,6 +14,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import workflow_models as models
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def write_snapshot_file(hf_cache_root, hf, size):
+    """A sparse (size-only, no real content) HF cache snapshot file for one `hf` model pin.
+
+    Mirrors workflow_models.resolve_snapshot_dir: builds the path from `hf['revision']`
+    as declared, adding a self-pointing `refs/<rev>` file when that revision isn't
+    already a 40-hex commit (so the ref-indirection code path is always exercised too,
+    the same way it would be for an unpinned `revision: main` in a real manifest).
+    """
+    org, name = hf['repo'].split('/', 1)
+    repo_dir = hf_cache_root / f'models--{org}--{name}'
+    revision = hf.get('revision') or 'main'
+    if not re.fullmatch(r'[0-9a-fA-F]{40}', revision):
+        ref_file = repo_dir / 'refs' / revision
+        ref_file.parent.mkdir(parents=True, exist_ok=True)
+        ref_file.write_text(revision)
+    path = repo_dir / 'snapshots' / revision / hf['file']
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('wb') as stream:
+        if size:
+            stream.truncate(size)
+    return path
+
+
+def write_manifest_snapshots(hf_cache_root, plan):
+    """Sparse HF cache snapshots for every hf-sourced item in a resolved `plan`,
+    sized to each item's declared `bytes` (0 -> empty file, size check skipped)."""
+    for item in plan.values():
+        hf = item.get('hf')
+        if hf:
+            write_snapshot_file(hf_cache_root, hf, item.get('bytes') or 0)
 
 
 def test_senai_all_modes_six_models(tmp_path):
@@ -92,22 +127,23 @@ def test_custom_model_root_is_registered_with_comfy(tmp_path, monkeypatch):
     monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
     monkeypatch.setenv('COMFY_MODEL_ROOT', str(tmp_path / 'persistent-models'))
     monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+    monkeypatch.setenv('MODEL_DOWNLOAD_POLICY', 'missing')
     monkeypatch.setattr(sys, 'argv', ['workflow_models.py'])
-    with patch.object(models, 'download') as download:
+    with patch.object(models, 'download_all') as download_all:
         models.main()
-        assert download.call_count == 6
+        assert download_all.call_count == 1
+        assert len(download_all.call_args.args[0]) == 6
     config = yaml.safe_load((tmp_path / 'paths.yaml').read_text())['workflow_models']
     assert config['base_path'] == str(tmp_path / 'persistent-models')
     assert config['latent_upscale_models'] == 'latent_upscale_models/'
     assert config['text_encoders'] == 'text_encoders/'
 
 
-def test_minimax_editor_metadata_does_not_include_ltx(tmp_path):
+def test_minimax_h3_manifest_v2_eight_models_two_repos(tmp_path):
     plan = models.load_plan('minimax-h3.yaml', ROOT / 'workflow', tmp_path)
-    direct = models.load_plan('video_minimax_h3_r2v.json', ROOT / 'workflow', tmp_path)
-    assert plan == direct
-    assert len(plan) == 5
-    assert all('MiniMax-H3' in item['url'] for item in plan.values())
+    assert len(plan) == 8
+    repos = {item['hf']['repo'] for item in plan.values()}
+    assert repos == {'Comfy-Org/MiniMax-H3', 'Comfy-Org/SDPose'}
     assert not any('ltx' in item['path'].lower() for item in plan.values())
 
 
@@ -143,7 +179,6 @@ def test_cache_identity_changes_when_source_changes(tmp_path):
 
 
 def test_concurrent_workers_download_once(tmp_path):
-    from concurrent.futures import ThreadPoolExecutor
     item = {'path': 'vae/model.pt', 'url': 'https://example.com/model.pt', 'sha256': None}
     response = MagicMock()
     response.__enter__.return_value = response
@@ -151,7 +186,300 @@ def test_concurrent_workers_download_once(tmp_path):
     response.iter_content.return_value = [b'weights']
     target = tmp_path / 'vae/model.pt'
     with patch.object(models.requests, 'get', return_value=response) as get:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            list(pool.map(lambda _: models.download(target, item), range(2)))
+        threads = [threading.Thread(target=models.download, args=(target, item)) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         assert get.call_count == 1
     assert models.cached(target, item)
+
+
+# --- --verify -----------------------------------------------------------
+
+def test_verify_ltx_set_ready_with_hf_cache(tmp_path, monkeypatch):
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    plan = models.load_plan('ltx25.yaml', ROOT / 'workflow', model_root)
+    write_manifest_snapshots(hf_cache_root, plan)
+
+    monkeypatch.setenv('WORKFLOWS', 'ltx25.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
+    monkeypatch.setenv('HF_CACHE_ROOT', str(hf_cache_root))
+    monkeypatch.setenv('AWS_BUCKET_NAME', 'staging')
+    monkeypatch.setenv('SENAI_WORKER_STATE', str(tmp_path / 'state.json'))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    state = models.run_verify()
+
+    assert state['ready'] is True
+    assert state['unready_code'] is None
+    assert state['models']['declared'] == 6
+    assert state['models']['present'] == 6
+    assert state['models']['missing'] == []
+    assert len(state['declared_model_names']) == 6
+    assert not any('minimax' in n.lower() for n in state['declared_model_names'])
+
+    config = yaml.safe_load((tmp_path / 'paths.yaml').read_text())
+    hf_sections = [v for k, v in config.items() if k.startswith('hf_')]
+    assert len(hf_sections) == 2
+    assert 'workflow_models' in config
+
+
+def test_verify_h3_set_eight_models_two_repos_no_ltx(tmp_path, monkeypatch):
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    plan = models.load_plan('minimax-h3.yaml', ROOT / 'workflow', model_root)
+    write_manifest_snapshots(hf_cache_root, plan)
+
+    monkeypatch.setenv('WORKFLOWS', 'minimax-h3.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
+    monkeypatch.setenv('HF_CACHE_ROOT', str(hf_cache_root))
+    monkeypatch.setenv('AWS_BUCKET_NAME', 'staging')
+    monkeypatch.setenv('SENAI_WORKER_STATE', str(tmp_path / 'state.json'))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    state = models.run_verify()
+
+    assert state['models']['declared'] == 8
+    assert not any('ltx' in name.lower() for name in state['declared_model_names'])
+    config = yaml.safe_load((tmp_path / 'paths.yaml').read_text())
+    hf_sections = {k: v for k, v in config.items() if k.startswith('hf_')}
+    assert len(hf_sections) == 2
+
+
+def test_verify_wrong_size_marks_missing(tmp_path, monkeypatch):
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    manifest_path = tmp_path / 'm.yaml'
+    manifest_path.write_text(yaml.safe_dump({
+        'version': 2, 'set': 'x', 'requires_comfyui': '>=0.36.0', 'custom_nodes': [],
+        'workflows': [], 'allowed_class_types_extra': [], 'limits': {}, 'warmup_graph': None,
+        'models': [
+            {'path': 'vae/a.safetensors', 'hf': {'repo': 'Org/Repo', 'revision': 'main', 'file': 'vae/a.safetensors'},
+             'sha256': None, 'bytes': 999},
+        ],
+    }))
+    write_snapshot_file(hf_cache_root, {'repo': 'Org/Repo', 'revision': 'main', 'file': 'vae/a.safetensors'}, size=5)
+
+    monkeypatch.setenv('WORKFLOWS', 'm.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(tmp_path))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
+    monkeypatch.setenv('HF_CACHE_ROOT', str(hf_cache_root))
+    monkeypatch.setenv('AWS_BUCKET_NAME', 'staging')
+    monkeypatch.setenv('SENAI_WORKER_STATE', str(tmp_path / 'state.json'))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    state = models.run_verify()
+
+    assert state['ready'] is False
+    assert state['unready_code'] == 'MODEL_CACHE_MISSING'
+    assert 'vae/a.safetensors' in state['models']['missing']
+
+
+def test_verify_resolves_ref_file_to_snapshot_commit(tmp_path, monkeypatch):
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    manifest_path = tmp_path / 'm.yaml'
+    manifest_path.write_text(yaml.safe_dump({
+        'version': 2, 'set': 'x', 'requires_comfyui': '>=0.36.0', 'custom_nodes': [],
+        'workflows': [], 'allowed_class_types_extra': [], 'limits': {}, 'warmup_graph': None,
+        'models': [
+            {'path': 'vae/a.safetensors', 'hf': {'repo': 'Org/Repo', 'revision': 'main', 'file': 'vae/a.safetensors'},
+             'sha256': None, 'bytes': 0},
+        ],
+    }))
+    commit = 'a' * 40
+    repo_dir = hf_cache_root / 'models--Org--Repo'
+    (repo_dir / 'refs').mkdir(parents=True)
+    (repo_dir / 'refs' / 'main').write_text(commit)
+    path = repo_dir / 'snapshots' / commit / 'vae/a.safetensors'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'weights')
+
+    monkeypatch.setenv('WORKFLOWS', 'm.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(tmp_path))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
+    monkeypatch.setenv('HF_CACHE_ROOT', str(hf_cache_root))
+    monkeypatch.setenv('AWS_BUCKET_NAME', 'staging')
+    monkeypatch.setenv('SENAI_WORKER_STATE', str(tmp_path / 'state.json'))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    state = models.run_verify()
+    assert state['ready'] is True
+
+
+def test_verify_h3_completes_fast_without_reading_file_contents(tmp_path, monkeypatch):
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    plan = models.load_plan('minimax-h3.yaml', ROOT / 'workflow', model_root)
+    write_manifest_snapshots(hf_cache_root, plan)
+
+    monkeypatch.setenv('WORKFLOWS', 'minimax-h3.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
+    monkeypatch.setenv('HF_CACHE_ROOT', str(hf_cache_root))
+    monkeypatch.setenv('AWS_BUCKET_NAME', 'staging')
+    monkeypatch.setenv('SENAI_WORKER_STATE', str(tmp_path / 'state.json'))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    real_open = open
+    opened_model_files = []
+
+    def tracking_open(file, *args, **kwargs):
+        path = Path(file)
+        if path.suffix == '.safetensors':
+            opened_model_files.append(path)
+        return real_open(file, *args, **kwargs)
+
+    with patch.object(models.hashlib, 'file_digest') as digest, \
+         patch('builtins.open', side_effect=tracking_open):
+        start = time.monotonic()
+        state = models.run_verify()
+        elapsed = time.monotonic() - start
+        digest.assert_not_called()
+    assert opened_model_files == []
+    assert elapsed < 2.0
+    assert state['ready'] is True
+    assert state['models']['declared'] == 8
+    assert state['models']['missing'] == []
+    assert state['allowed_class_types']
+    for class_type in ('MiniMaxH3ReferenceToVideo', 'MiniMaxH3FunControlNetApply', 'LoadVideo', 'PreviewImage'):
+        assert class_type in state['allowed_class_types']
+
+
+def test_missing_policy_stops_within_download_budget(tmp_path, monkeypatch):
+    manifest_path = tmp_path / 'm.yaml'
+    manifest_path.write_text(yaml.safe_dump({
+        'version': 2, 'set': 'x', 'requires_comfyui': '>=0.36.0', 'custom_nodes': [],
+        'workflows': [], 'allowed_class_types_extra': [], 'limits': {}, 'warmup_graph': None,
+        'models': [
+            {'path': 'vae/a.safetensors', 'hf': {'repo': 'Org/Repo', 'revision': 'main', 'file': 'vae/a.safetensors'},
+             'sha256': None, 'bytes': 0},
+        ],
+    }))
+    model_root = tmp_path / 'models'
+
+    def slow_get(*args, **kwargs):
+        time.sleep(10)
+        raise AssertionError('should never return within the test')
+
+    monkeypatch.setenv('WORKFLOWS', 'm.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(tmp_path))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
+    monkeypatch.setenv('MODEL_DOWNLOAD_POLICY', 'missing')
+    monkeypatch.setenv('MODEL_DOWNLOAD_BUDGET_SEC', '1')
+    monkeypatch.setattr(sys, 'argv', ['workflow_models.py'])
+
+    with patch.object(models.requests, 'get', side_effect=slow_get):
+        start = time.monotonic()
+        with pytest.raises(RuntimeError, match='(?i)budget'):
+            models.main()
+        elapsed = time.monotonic() - start
+    assert elapsed < 3.0
+
+
+def test_missing_policy_lock_timeout_does_not_hang(tmp_path, monkeypatch):
+    target = tmp_path / 'vae' / 'a.safetensors'
+    target.parent.mkdir(parents=True)
+    item = {'path': 'vae/a.safetensors', 'url': 'https://example.com/a.safetensors', 'sha256': None}
+    monkeypatch.setenv('MODEL_LOCK_TIMEOUT_SEC', '1')
+
+    lock_path = target.with_name(target.name + '.lock')
+    holder = lock_path.open('a')
+    import fcntl
+    fcntl.flock(holder, fcntl.LOCK_EX)
+    try:
+        start = time.monotonic()
+        with pytest.raises(TimeoutError):
+            models.download(target, item)
+        elapsed = time.monotonic() - start
+    finally:
+        holder.close()
+    assert elapsed < 3.0
+
+
+def test_verify_output_not_configured_without_bucket(tmp_path, monkeypatch):
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    plan = models.load_plan('ltx25.yaml', ROOT / 'workflow', model_root)
+    write_manifest_snapshots(hf_cache_root, plan)
+
+    monkeypatch.setenv('WORKFLOWS', 'ltx25.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
+    monkeypatch.setenv('HF_CACHE_ROOT', str(hf_cache_root))
+    monkeypatch.delenv('AWS_BUCKET_NAME', raising=False)
+    monkeypatch.setenv('SENAI_WORKER_STATE', str(tmp_path / 'state.json'))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    state = models.run_verify()
+    assert state['ready'] is False
+    assert state['unready_code'] == 'OUTPUT_NOT_CONFIGURED'
+
+
+def test_verify_corrupt_manifest_still_yields_hex_manifest_sha256(tmp_path, monkeypatch):
+    manifest_path = tmp_path / 'broken.yaml'
+    manifest_path.write_text('workflows: [unterminated\n')  # invalid YAML flow sequence
+
+    monkeypatch.setenv('WORKFLOWS', 'broken.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(tmp_path))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(tmp_path / 'models'))
+    monkeypatch.setenv('AWS_BUCKET_NAME', 'staging')
+    monkeypatch.setenv('SENAI_WORKER_STATE', str(tmp_path / 'state.json'))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    state = models.run_verify()
+
+    assert state['ready'] is False
+    assert state['unready_code'] == 'MODEL_CACHE_MISSING'
+    assert state['unready_message']
+    assert re.fullmatch(r'[0-9a-f]{64}', state['manifest_sha256'])
+    assert state['manifest_sha256'] == hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+
+
+def test_verify_missing_workflows_file_still_yields_hex_manifest_sha256(tmp_path, monkeypatch):
+    monkeypatch.setenv('WORKFLOWS', 'does-not-exist.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(tmp_path))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(tmp_path / 'models'))
+    monkeypatch.setenv('AWS_BUCKET_NAME', 'staging')
+    monkeypatch.setenv('SENAI_WORKER_STATE', str(tmp_path / 'state.json'))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    state = models.run_verify()
+
+    assert state['ready'] is False
+    assert state['unready_code'] == 'MODEL_CACHE_MISSING'
+    assert state['unready_message']
+    assert state['manifest_sha256'] == hashlib.sha256(b'').hexdigest()
+
+
+def test_default_download_policy_is_cache_only(tmp_path, monkeypatch):
+    monkeypatch.setenv('WORKFLOWS', 'minimax-h3.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(tmp_path))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+    monkeypatch.delenv('MODEL_DOWNLOAD_POLICY', raising=False)
+    monkeypatch.setattr(sys, 'argv', ['workflow_models.py'])
+
+    with patch.object(models, 'download_all') as download_all, patch.object(models.requests, 'get') as get, \
+         pytest.raises(RuntimeError, match='Prepare model cache'):
+        models.main()
+    download_all.assert_not_called()
+    get.assert_not_called()
+
+
+def test_ltx_workflow_canonical_sha256_matches_contract_pins():
+    pins = yaml.safe_load((ROOT / 'contract/senai-worker-1/pins.yaml').read_text())
+    pinned = {w['id']: w['sha256_canonical'] for w in pins['workflows'] if w['status'] == 'pinned'}
+    files = {
+        'ltx25-t2v-v1': 'ltx25-t2v-v1.json',
+        'ltx25-i2v-v1': 'ltx25-i2v-v1.json',
+        'ltx25-flf-v1': 'ltx25-flf-v1.json',
+    }
+    for workflow_id, filename in files.items():
+        graph = json.loads((ROOT / 'workflow' / filename).read_text())
+        digest = hashlib.sha256(json.dumps(graph, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        assert digest == pinned[workflow_id], workflow_id
