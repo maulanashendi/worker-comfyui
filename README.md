@@ -26,6 +26,15 @@ This project allows you to run ComfyUI workflows as a serverless API endpoint on
 
 ## Alur worker generik: dari workflow sampai endpoint
 
+Fork ini melayani permintaan Senai lewat protokol **`senai-worker/1`**
+(`input.protocol == "senai-worker/1"`), bukan lagi lewat env `OUTPUT_FORMAT=senai`
+yang sudah dicabut. Kontrak kabel lengkap ada di `contract/senai-worker-1/`
+(salinan dari `contracts/runpod-senai-worker/` repo senai) dan detail alur
+internal worker ada di [`docs/senai-worker-internals.md`](docs/senai-worker-internals.md).
+Bagian di bawah ini menjelaskan bagian yang masih sama untuk kedua protokol
+(pemilihan workflow/model), lalu [§6](#6-siapkan-image-dan-konfigurasi-endpoint)
+menjelaskan env spesifik protokol senai.
+
 Alur yang digunakan repo ini:
 
 **Pilih workflow → tes lokal → build image → checklist model → isi cache sekali → jalankan endpoint `cache-only` → hasil dikirim → worker dihentikan.**
@@ -174,27 +183,47 @@ Jangan aktifkan `PREPARE_MODELS_ONLY`, `MODEL_DOWNLOAD_CHECK_ONLY`, atau
 `SERVE_API_LOCALLY` pada endpoint serving. Cache yang belum siap akan menghasilkan
 error yang meminta preparation; worker tidak diam-diam mengunduh saat cold start.
 
-Untuk konsumen dengan kontrak respons Senai, tambahkan:
+**Endpoint yang melayani Senai** memakai protokol `senai-worker/1`, bukan lagi
+env `OUTPUT_FORMAT=senai` (dicabut). Tidak ada env pemilih protokol di sisi
+worker — dispatch ditentukan oleh `input.protocol` pada tiap request; endpoint
+hanya perlu env berikut selain env pemilihan workflow di atas:
 
 ```dotenv
-OUTPUT_FORMAT=senai
+HF_CACHE_ROOT=/runpod-volume/huggingface-cache/hub   # default, sesuaikan bila beda
 AWS_BUCKET_NAME=your-output-bucket
-AWS_ENDPOINT_URL=https://your-account.r2.cloudflarestorage.com
+AWS_ACCESS_KEY_ID=***
+AWS_SECRET_ACCESS_KEY=***
 AWS_DEFAULT_REGION=auto
+AWS_ENDPOINT_URL=https://your-account.r2.cloudflarestorage.com
+INPUT_ALLOWED_HOSTS=your-senai-asset-bucket.example.com
+REFRESH_WORKER=dirty
 ```
 
-Simpan `AWS_ACCESS_KEY_ID` dan `AWS_SECRET_ACCESS_KEY` sebagai secret endpoint.
-Sesuaikan endpoint/region untuk storage yang digunakan. Senai harus mengizinkan
-hostname hasil di `allowed_output_hosts`; output base64 ditolak oleh Senai.
-`OUTPUT_FORMAT=senai` hanya mengatur format respons, bukan menambahkan dukungan
-model MiniMax ke katalog atau codec aplikasi Senai.
+Untuk deployment Senai, bobot **bukan** diisi lewat langkah 4–5 di atas (network
+volume yang disiapkan manual): produksi memakai fitur **cached model Hugging
+Face RunPod** — repo HF yang dipilih di template endpoint, dicache RunPod di
+`HF_CACHE_ROOT/models--<org>--<repo>/snapshots/<revision>/<file>`. Boot
+memverifikasi keberadaan tiap file dengan `stat` (ukuran cocok manifest), tanpa
+menghitung ulang hash. Cache yang kurang tidak membuat worker crash-loop;
+worker tetap boot dalam **mode unready** (`ready:false`, kode
+`MODEL_CACHE_MISSING`/`OUTPUT_NOT_CONFIGURED`) dan menjawab tiap job dengan
+kode itu, supaya operator melihat penyebabnya lewat `/health` alih-alih retry
+tanpa akhir. Detail env lengkap, nilai produksi, dan penjelasan protokol ada di
+[Configuration Guide](docs/configuration.md#senai-worker1-protocol).
 
 ### 7. Kirim job API dan verifikasi sampai worker berhenti
 
+Contoh di bawah memakai payload upstream (`input.workflow` + `input.images`),
+berlaku hanya ketika `LEGACY_UPSTREAM_INPUT=true` dan tidak dipakai di endpoint
+Senai. Untuk endpoint Senai, kirim envelope `senai-worker/1`
+(`input.protocol`, `input.workflow`, `input.inputs[]`, `input.trace`,
+`input.limits`) seperti dicontohkan di
+[Configuration Guide](docs/configuration.md#senai-worker1-protocol); jangan
+mengirim JSON editor MiniMax langsung sebagai payload pada kedua jalur.
+
 Siapkan `request.json` dengan envelope `{"input":{"workflow": ...}}` berisi
 graph API lengkap. Untuk R2V/I2V, tambahkan `input.images` berisi nama dan base64
-gambar referensi yang cocok dengan node `LoadImage`. Jangan mengirim JSON editor
-MiniMax langsung sebagai payload.
+gambar referensi yang cocok dengan node `LoadImage`.
 
 Dengan `RUNPOD_API_KEY` dan `RUNPOD_ENDPOINT_ID` sudah diisi pada shell:
 

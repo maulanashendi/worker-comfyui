@@ -196,9 +196,16 @@ Python/custom-node dependencies do require a compatible image. Manager stays off
 
 ### Handler and Senai output
 
-Keep `OUTPUT_FORMAT=senai` explicit on Senai endpoints; it is not tied to a model.
-It returns `status: success` with media entries under `output`. For signed S3/R2
-URLs configure `AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
-`AWS_ENDPOINT_URL` and `AWS_DEFAULT_REGION` (R2: `auto`). Senai must allow the
-storage hostname. Small outputs without a bucket are base64; Senai rejects them.
-Other callers retain the existing image response format by default.
+Senai traffic is dispatched by `input.protocol == "senai-worker/1"` on each
+request, not by an env flag — the old `OUTPUT_FORMAT=senai` switch has been
+removed along with the handler code path it selected. Outputs always upload to
+S3/R2 (`AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+`AWS_ENDPOINT_URL`, `AWS_DEFAULT_REGION=auto` for R2) and are reported as
+presigned `https://` URLs with content-derived `media_type`, dimensions,
+duration, fps and audio flags — base64 is never sent on this path, and a
+missing bucket boots the worker into an explicit unready state instead of
+falling back to base64. See
+[Configuration Guide](configuration.md#senai-worker1-protocol) for the full
+env table, protocol summary and known limitations. Callers that don't set
+`input.protocol` keep the existing upstream image response format, but only
+when `LEGACY_UPSTREAM_INPUT=true`; it is never enabled on a Senai endpoint.
