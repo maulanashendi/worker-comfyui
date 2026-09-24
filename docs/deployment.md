@@ -155,7 +155,9 @@ without a rebuild. Select only workflows the endpoint actually serves.
 > self-managed cache. **Senai's production endpoints do not use it.** The H3
 > endpoint builds from `Dockerfile.minimax-h3` (GitHub integration → Dockerfile
 > Path), which bakes the eight files of `workflow/minimax-h3.yaml` at their
-> pinned commits under `/comfyui/models` and needs no model references: RunPod's
+> pinned commits under `/comfyui/models` — before the worker code is copied in,
+> so a small code change doesn't force a rebuild and re-pull of those model
+> layers — and needs no model references: RunPod's
 > cached models pull a whole repository, and `Comfy-Org/MiniMax-H3` is about
 > 480 GB of which the set uses 46.7 GB. The LTX set selects
 > `Lightricks/LTX-2.5` + `Comfy-Org/gemma-4` as RunPod's native

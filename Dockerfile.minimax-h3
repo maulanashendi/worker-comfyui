@@ -114,6 +114,47 @@ RUN echo "${COMFYUI_VERSION}" > /etc/senai-comfyui-version
 # Go back to the root
 WORKDIR /
 
+# MiniMax H3 serving image: SYSTEM and APP below are repeated verbatim from
+# ./Dockerfile (RunPod's GitHub builder takes no build args or target, so the
+# baked stage must be the only/last stage of its own Dockerfile;
+# tests/test_dockerfile_minimax_h3.py keeps the copy in sync). The model
+# weights are baked here, BEFORE the worker code (requirements.txt, src/,
+# handler.py, workflow/) is copied in below: a builder with the prior layer
+# cache only re-executes layers after the first one that changed, so a small
+# code change no longer forces the ~48.8 GB of model layers to rebuild and be
+# re-pulled on every host. Bakes exactly the models of workflow/minimax-h3.yaml
+# at their pinned commits and checks each sha256, so the worker's cache-only
+# boot finds them under COMFY_MODEL_ROOT.
+WORKDIR /comfyui/models
+RUN mkdir -p checkpoints diffusion_models loras model_patches text_encoders vae
+
+RUN wget -nv -O vae/minimax_h3_video_vae_fp16.safetensors \
+      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_video_vae_fp16.safetensors \
+    && echo "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522  vae/minimax_h3_video_vae_fp16.safetensors" | sha256sum -c -
+RUN wget -nv -O vae/minimax_h3_audio_vae_fp32.safetensors \
+      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_audio_vae_fp32.safetensors \
+    && echo "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48  vae/minimax_h3_audio_vae_fp32.safetensors" | sha256sum -c -
+RUN wget -nv -O diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
+      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
+    && echo "9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779  diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors" | sha256sum -c -
+RUN wget -nv -O text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors \
+      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors \
+    && echo "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6  text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors" | sha256sum -c -
+RUN wget -nv -O loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors \
+      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors \
+    && echo "5b9ab5ade15d0775676d01a907268a69a1468dc6033b3b0d3ded5502f3ebb84c  loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors" | sha256sum -c -
+RUN wget -nv -O model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors \
+      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors \
+    && echo "9c645c0a308c8af361efd43b409710f6f8fec0db297c29503e141a84991fed0c  model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors" | sha256sum -c -
+RUN wget -nv -O checkpoints/sdpose_wholebody_fp16.safetensors \
+      https://huggingface.co/Comfy-Org/SDPose/resolve/acb43fbe8142b54d9ebd52b720b81dd4e14c8d81/checkpoints/sdpose_wholebody_fp16.safetensors \
+    && echo "63d01f9a7494560693b24767f4469d59c9d3266b31ff0a253e74d1e611442721  checkpoints/sdpose_wholebody_fp16.safetensors" | sha256sum -c -
+RUN wget -nv -O diffusion_models/rt_detr_v4-x-hgnet_fp16.safetensors \
+      https://huggingface.co/Comfy-Org/SDPose/resolve/acb43fbe8142b54d9ebd52b720b81dd4e14c8d81/diffusion_models/rt_detr_v4-x-hgnet_fp16.safetensors \
+    && echo "581f9af9bbabb664d1891cbccd823308b176ecd409146f954dfa39af3bec2476  diffusion_models/rt_detr_v4-x-hgnet_fp16.safetensors" | sha256sum -c -
+
+WORKDIR /
+
 # Install Python runtime dependencies for the handler
 COPY requirements.txt /requirements.txt
 RUN uv pip install -r /requirements.txt
@@ -144,40 +185,3 @@ CMD ["/start.sh"]
 ARG CUSTOM_NODE_MANIFESTS=""
 COPY scripts/install-workflow-nodes.py /install-workflow-nodes.py
 RUN python /install-workflow-nodes.py --manifests "$CUSTOM_NODE_MANIFESTS"
-
-# MiniMax H3 serving image: the base stage above, repeated verbatim from ./Dockerfile
-# (RunPod's GitHub builder takes no build args or target, so the baked stage must be the
-# last stage of its own Dockerfile; tests/test_dockerfile_minimax_h3.py keeps the copy in
-# sync). Bakes exactly the models of workflow/minimax-h3.yaml at their pinned commits and
-# checks each sha256, so the worker's cache-only boot finds them under COMFY_MODEL_ROOT.
-FROM base AS minimax-h3
-
-WORKDIR /comfyui/models
-RUN mkdir -p checkpoints diffusion_models loras model_patches text_encoders vae
-
-RUN wget -nv -O vae/minimax_h3_video_vae_fp16.safetensors \
-      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_video_vae_fp16.safetensors \
-    && echo "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522  vae/minimax_h3_video_vae_fp16.safetensors" | sha256sum -c -
-RUN wget -nv -O vae/minimax_h3_audio_vae_fp32.safetensors \
-      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_audio_vae_fp32.safetensors \
-    && echo "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48  vae/minimax_h3_audio_vae_fp32.safetensors" | sha256sum -c -
-RUN wget -nv -O diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
-      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors \
-    && echo "9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779  diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors" | sha256sum -c -
-RUN wget -nv -O text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors \
-      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors \
-    && echo "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6  text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors" | sha256sum -c -
-RUN wget -nv -O loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors \
-      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors \
-    && echo "5b9ab5ade15d0775676d01a907268a69a1468dc6033b3b0d3ded5502f3ebb84c  loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors" | sha256sum -c -
-RUN wget -nv -O model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors \
-      https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors \
-    && echo "9c645c0a308c8af361efd43b409710f6f8fec0db297c29503e141a84991fed0c  model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors" | sha256sum -c -
-RUN wget -nv -O checkpoints/sdpose_wholebody_fp16.safetensors \
-      https://huggingface.co/Comfy-Org/SDPose/resolve/acb43fbe8142b54d9ebd52b720b81dd4e14c8d81/checkpoints/sdpose_wholebody_fp16.safetensors \
-    && echo "63d01f9a7494560693b24767f4469d59c9d3266b31ff0a253e74d1e611442721  checkpoints/sdpose_wholebody_fp16.safetensors" | sha256sum -c -
-RUN wget -nv -O diffusion_models/rt_detr_v4-x-hgnet_fp16.safetensors \
-      https://huggingface.co/Comfy-Org/SDPose/resolve/acb43fbe8142b54d9ebd52b720b81dd4e14c8d81/diffusion_models/rt_detr_v4-x-hgnet_fp16.safetensors \
-    && echo "581f9af9bbabb664d1891cbccd823308b176ecd409146f954dfa39af3bec2476  diffusion_models/rt_detr_v4-x-hgnet_fp16.safetensors" | sha256sum -c -
-
-WORKDIR /
