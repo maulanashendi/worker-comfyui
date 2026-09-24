@@ -152,11 +152,16 @@ without a rebuild. Select only workflows the endpoint actually serves.
 
 > [!NOTE]
 > The manual network-volume preparation above is the generic path for a
-> self-managed cache. **Senai's production endpoints do not use it.** They
-> select `Lightricks/LTX-2.5` + `Comfy-Org/gemma-4` (LTX set) or
-> `Comfy-Org/MiniMax-H3` + `Comfy-Org/SDPose` (H3 set) as RunPod's native
+> self-managed cache. **Senai's production endpoints do not use it.** The H3
+> endpoint builds from `Dockerfile.minimax-h3` (GitHub integration → Dockerfile
+> Path), which bakes the eight files of `workflow/minimax-h3.yaml` at their
+> pinned commits under `/comfyui/models` and needs no model references: RunPod's
+> cached models pull a whole repository, and `Comfy-Org/MiniMax-H3` is about
+> 480 GB of which the set uses 46.7 GB. The LTX set selects
+> `Lightricks/LTX-2.5` + `Comfy-Org/gemma-4` as RunPod's native
 > Hugging Face **cached models** on the template, and the worker reads them
-> from `HF_CACHE_ROOT` at boot — see
+> from the RunPod cached-model mount at boot (falling back to `HF_CACHE_ROOT`
+> if that mount is absent) — see
 > [Configuration Guide](configuration.md#senai-worker1-protocol) for the full
 > env list, the `senai-worker/1` protocol, and the unready-boot behavior when
 > a cached model or `AWS_BUCKET_NAME` is missing.
