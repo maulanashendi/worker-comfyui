@@ -106,6 +106,22 @@ def test_deadline_passed_rejected():
     assert exc.value.code == "DEADLINE_PASSED"
 
 
+@pytest.mark.parametrize("value", [0, "10", 10.5, True])
+def test_max_execution_sec_invalid_rejected(value):
+    job_input = _base_workflow_input()
+    job_input["limits"]["max_execution_sec"] = value
+    with pytest.raises(WorkerError) as exc:
+        guard.parse_envelope(job_input, now=NOW)
+    assert exc.value.code == "INVALID_ENVELOPE"
+
+
+def test_max_execution_sec_valid_accepted():
+    job_input = _base_workflow_input()
+    job_input["limits"]["max_execution_sec"] = 10
+    envelope = guard.parse_envelope(job_input, now=NOW)
+    assert envelope.max_execution_sec == 10
+
+
 def test_name_with_path_escape_rejected():
     job_input = _base_workflow_input()
     job_input["inputs"][0]["name"] = "../x.png"

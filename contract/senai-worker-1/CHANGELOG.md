@@ -1,5 +1,15 @@
 # Changelog — kontrak runpod-senai-worker
 
+## 0.3.0 — 2026-09-24
+
+Tambahan opsional (minor), dari G8 yang diputus RunPod pada 605 s tanpa diagnosis:
+
+- §3.1 request `limits.max_execution_sec`: anggaran eksekusi dari mulai job, diisi sama dengan
+  `policy.executionTimeout` / 1000. Worker berhenti 30 s sebelumnya dengan `EXECUTION_DEADLINE`
+  (pesan menyebut node yang sedang jalan), sehingga error bertipe terkirim sebelum RunPod
+  memutus job. Sebelumnya deadline worker selalu jatuh setelah `executionTimeout`.
+- §4.1 response `timings.node_sec`: detik per node yang dieksekusi, di output sukses dan error.
+
 ## 0.2.2 — 2026-09-23
 
 Klarifikasi dari verifikasi `runpodctl serverless model-status`, tanpa perubahan bentuk kabel:

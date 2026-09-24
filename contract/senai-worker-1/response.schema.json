@@ -221,6 +221,13 @@
             "minimum": 0
           }
         },
+        "node_sec": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
         "fetch_ms": {
           "type": "integer",
           "minimum": 0

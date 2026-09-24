@@ -1,7 +1,7 @@
 # Kontrak: RunPod senai-worker (protokol `senai-worker/1`)
 
 Status: **draft mengikat** (lihat urutan otoritas di `contracts/README.md`).
-Versi: `0.2.2` — lihat `pins.yaml` dan `CHANGELOG.md`.
+Versi: `0.3.0` — lihat `pins.yaml` dan `CHANGELOG.md`.
 
 Kontrak ini adalah spesifikasi yang dipakai **kedua sisi** untuk implementasi paralel:
 worker (`maulanashendi/worker-comfyui`, fork `runpod-workers/worker-comfyui`) dan senai
@@ -75,9 +75,10 @@ Request tanpa `protocol` ditolak dengan `UNSUPPORTED_PROTOCOL`. Pengecualiannya 
 | `inputs[].media_type` | Ya | Dicocokkan dengan sniff konten. Kalau tidak cocok → `INPUT_INVALID`. |
 | `inputs[].bytes`, `sha256` | Tidak | Kalau ada, diverifikasi setelah fetch. |
 | `trace` | Ya | Semua field wajib. Di-echo balik utuh (§4). |
-| `limits.deadline_at` | Ya | RFC 3339 UTC. Deadline efektif = min(`deadline_at`, mulai job + `JOB_DEADLINE_CEILING_SEC`). |
+| `limits.deadline_at` | Ya | RFC 3339 UTC. Deadline efektif = min(`deadline_at`, mulai job + `JOB_DEADLINE_CEILING_SEC`, mulai job + `execution_ceiling_sec` manifest, mulai job + `max_execution_sec` − 30 s). |
 | `limits.no_progress_sec` | Tidak | Default dari env `NO_PROGRESS_SEC`. |
 | `limits.no_progress_load_sec` | Tidak | Jendela tanpa-progres saat node loader aktif. Default dari env `NO_PROGRESS_LOAD_SEC`. |
+| `limits.max_execution_sec` | Tidak | Anggaran eksekusi dihitung dari saat worker mulai menjalankan job. Pengirim mengisinya **sama dengan** `policy.executionTimeout` / 1000. Worker berhenti 30 s sebelumnya (minimal 1 s) dengan `EXECUTION_DEADLINE`, supaya error bertipe beserta node yang sedang jalan terkirim sebelum RunPod memutus job tanpa detail (`FAILED`, `executionTimeout exceeded`). |
 
 Kunci lain di `input` ditolak (`INVALID_ENVELOPE`), termasuk `images`, `comfy_org_api_key`,
 dan `api_key_comfy_org`. Env `COMFY_ORG_API_KEY` diabaikan di jalur protokol ini, sehingga
@@ -129,9 +130,15 @@ worker. SDK mencabutnya sebelum hasil dikirim, jadi field itu tidak pernah terli
             "gpu": "NVIDIA L40S", "cuda": "12.8"},
   "timings": {"cold": true, "boot_age_sec": 41.2, "boot_timeline": {"…": 0.0},
               "fetch_ms": 900, "comfy_queue_ms": 5, "execution_ms": 61234,
-              "collect_ms": 300, "upload_ms": 1200}
+              "collect_ms": 300, "upload_ms": 1200,
+              "node_sec": {"131": 2.4, "142": 48.1, "92": 3.0}}
 }
 ```
+
+`timings.node_sec` (opsional): detik wall per node yang sempat dieksekusi, diukur dari pesan
+websocket `executing` ComfyUI (node mulai → node berikutnya mulai / selesai). Juga dikirim di
+output error (§4.2) untuk node yang sudah jalan sampai saat gagal, termasuk node yang sedang
+jalan. Node yang di-cache ComfyUI tidak muncul.
 
 - `outputs[]` minimal satu entri. Entri `type: "temp"` dari history ComfyUI tidak pernah
   dilaporkan.

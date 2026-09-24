@@ -1,7 +1,7 @@
 # Machine-checkable pins for the runpod-senai-worker contract.
 # Human-readable rationale lives in CONTRACT.md — this file is the numbers only.
 
-contract_version: "0.2.2"
+contract_version: "0.3.0"
 protocol: "senai-worker/1"
 
 producer:

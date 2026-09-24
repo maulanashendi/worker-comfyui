@@ -26,6 +26,10 @@ except ImportError:  # pragma: no cover - runpod always present in prod image
 LOADER_CLASS_TYPE_EXACT = frozenset({"MiniMaxH3ReferenceToVideo"})
 LOADER_CLASS_TYPE_PREFIXES = ("CLIPTextEncode", "TextEncode")
 
+# RunPod cuts the job at policy.executionTimeout with no diagnosis; we must
+# raise EXECUTION_DEADLINE with node context before that happens.
+PLATFORM_TIMEOUT_MARGIN_SEC = 30
+
 
 def _is_loader_class_type(class_type: str | None) -> bool:
     if not class_type:
@@ -404,7 +408,7 @@ def _running_node_progress(nodes: dict):
     return None, None, None
 
 
-def _monitor(comfy, *, job, ws, prompt_id, client_id, class_types, envelope, boot_state, wall_start, mono_start):
+def _monitor(comfy, *, job, ws, prompt_id, client_id, class_types, envelope, boot_state, wall_start, mono_start, timings):
     no_progress_sec = envelope.no_progress_sec or boot_state.limits.get(
         "no_progress_sec", _env_int("NO_PROGRESS_SEC", 120)
     )
@@ -414,7 +418,10 @@ def _monitor(comfy, *, job, ws, prompt_id, client_id, class_types, envelope, boo
     job_ceiling = _env_int("JOB_DEADLINE_CEILING_SEC", 1800)
     limits_ceiling = boot_state.limits.get("execution_ceiling_sec", job_ceiling)
     deadline_from_wall = (envelope.deadline_at - wall_start).total_seconds()
-    effective_ceiling = min(deadline_from_wall, job_ceiling, limits_ceiling)
+    ceilings = [deadline_from_wall, job_ceiling, limits_ceiling]
+    if envelope.max_execution_sec is not None:
+        ceilings.append(max(1, envelope.max_execution_sec - PLATFORM_TIMEOUT_MARGIN_SEC))
+    effective_ceiling = min(ceilings)
     deadline_mono = mono_start + effective_ceiling
 
     # No-progress baseline starts now — right after queue_prompt succeeded, not at
@@ -424,13 +431,35 @@ def _monitor(comfy, *, job, ws, prompt_id, client_id, class_types, envelope, boo
     last_reconcile_mono = no_progress_baseline_mono
     current_node = None
     current_class_type = None
+    current_value = None
+    current_max = None
     last_progress_sent_mono = 0.0
     # Until the first real progress tick, cold GPU loading can happen inside any
     # node (not just ones classified as a "loader"), so the generous load window
     # applies broadly; afterwards the strict window applies except for loader nodes.
     seen_progress = False
 
+    node_sec: dict[str, float] = {}
+    node_start_mono: float | None = None
+
+    def _finalize_node_sec(end_mono):
+        nonlocal node_start_mono
+        if current_node is not None and node_start_mono is not None:
+            node_sec[current_node] = node_sec.get(current_node, 0.0) + (end_mono - node_start_mono)
+            node_start_mono = None
+        if node_sec:
+            timings["node_sec"] = {k: round(v, 3) for k, v in node_sec.items()}
+
+    def _location_suffix():
+        if not current_node:
+            return ""
+        loc = f" at node {current_node} ({current_class_type})"
+        if current_value is not None and current_max is not None:
+            loc += f" {current_value}/{current_max}"
+        return loc
+
     def abort_and_raise(worker_error: WorkerError):
+        _finalize_node_sec(time.monotonic())
         try:
             comfy.interrupt()
         except Exception:
@@ -446,7 +475,10 @@ def _monitor(comfy, *, job, ws, prompt_id, client_id, class_types, envelope, boo
             now_mono = time.monotonic()
             if now_mono >= deadline_mono:
                 abort_and_raise(
-                    WorkerError("EXECUTION_DEADLINE", f"execution exceeded deadline of {effective_ceiling:.0f}s")
+                    WorkerError(
+                        "EXECUTION_DEADLINE",
+                        f"execution exceeded deadline of {effective_ceiling:.0f}s{_location_suffix()}",
+                    )
                 )
 
             if not seen_progress:
@@ -465,11 +497,13 @@ def _monitor(comfy, *, job, ws, prompt_id, client_id, class_types, envelope, boo
                     last_reconcile_mono = now_mono
                     outputs = _reconcile(comfy, prompt_id)
                     if outputs is not None:
+                        _finalize_node_sec(time.monotonic())
                         return outputs
                 continue
             except (websocket.WebSocketConnectionClosedException, OSError, ConnectionError):
                 outputs = _reconcile(comfy, prompt_id)
                 if outputs is not None:
+                    _finalize_node_sec(time.monotonic())
                     return outputs
                 try:
                     ws = comfy.ws_connect(client_id)
@@ -499,13 +533,21 @@ def _monitor(comfy, *, job, ws, prompt_id, client_id, class_types, envelope, boo
 
             if mtype == "executing":
                 node = data.get("node")
+                _finalize_node_sec(received_mono)
                 if node is None:
+                    current_node = None
+                    current_class_type = None
+                    current_value = None
+                    current_max = None
                     outputs = _reconcile(comfy, prompt_id)
                     if outputs is not None:
                         return outputs
                     return {}
                 current_node = str(node)
                 current_class_type = class_types.get(current_node)
+                current_value = None
+                current_max = None
+                node_start_mono = received_mono
                 last_progress_mono = received_mono
             elif mtype in ("progress", "progress_state"):
                 last_progress_mono = received_mono
@@ -515,6 +557,8 @@ def _monitor(comfy, *, job, ws, prompt_id, client_id, class_types, envelope, boo
                     progress_node, value, max_value = _running_node_progress(data.get("nodes") or {})
                 if value is not None:
                     seen_progress = True
+                if progress_node == current_node and value is not None:
+                    current_value, current_max = value, max_value
                 if progress_node is not None and received_mono - last_progress_sent_mono >= 5:
                     last_progress_sent_mono = received_mono
                     _send_progress(job, progress_node, value, max_value)
@@ -525,6 +569,13 @@ def _monitor(comfy, *, job, ws, prompt_id, client_id, class_types, envelope, boo
             elif mtype == "execution_interrupted":
                 raise WorkerError("NODE_EXCEPTION", "execution interrupted", node_id=data.get("node_id"))
     finally:
+        # Every exit from this loop — return, or a raise from any branch above
+        # (execution_error, execution_interrupted, COMFYUI_CRASHED, or
+        # abort_and_raise's NO_PROGRESS/EXECUTION_DEADLINE) — must close out the
+        # node that was running so timings["node_sec"] reflects it. Idempotent:
+        # abort_and_raise already calls this before raising, so a second call
+        # here (node_start_mono already None) is a no-op.
+        _finalize_node_sec(time.monotonic())
         try:
             ws.close()
         except Exception:
@@ -631,6 +682,7 @@ def run_job(job: dict, *, boot_state: BootState, comfy) -> dict:
             boot_state=boot_state,
             wall_start=wall_start,
             mono_start=mono_start,
+            timings=timings,
         )
         timings["execution_ms"] = int((time.monotonic() - exec_started) * 1000)
 
