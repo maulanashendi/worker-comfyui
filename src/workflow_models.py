@@ -17,6 +17,8 @@ import yaml
 
 PROTOCOL = "senai-worker/1"
 
+MODEL_STORE_ROOT = Path('/runpod/model-store/huggingface')
+
 
 def contained(root, relative):
     if not isinstance(relative, str) or not relative or Path(relative).is_absolute():
@@ -321,11 +323,21 @@ def resolve_snapshot_dir(hf_cache_root, repo, revision):
     return repo_dir / 'snapshots' / rev
 
 
-def find_model_file(item, hf_cache_root, model_root):
-    """Preferred candidate first: the HF cache snapshot, then COMFY_MODEL_ROOT as a fallback path."""
+def resolve_model_store_dir(model_store_root, repo, revision):
+    org, name = repo.split('/', 1)
+    return model_store_root / org / name / (revision or 'main')
+
+
+def find_model_file(item, hf_cache_root, model_root, model_store_root=None):
+    """Preferred candidate first: the RunPod cached-model mount, then the HF cache snapshot,
+    then COMFY_MODEL_ROOT as a fallback path."""
+    if model_store_root is None:
+        model_store_root = MODEL_STORE_ROOT
     candidates = []
     hf = item.get('hf')
     if hf:
+        store_dir = resolve_model_store_dir(model_store_root, hf['repo'], hf.get('revision'))
+        candidates.append(store_dir / hf['file'])
         snapshot = resolve_snapshot_dir(hf_cache_root, hf['repo'], hf.get('revision'))
         candidates.append(snapshot / hf['file'])
     candidates.append(contained(model_root, item['path']))
@@ -369,14 +381,21 @@ def raw_manifest_sha256(selection, workflow_root):
     return digest.hexdigest()
 
 
-def write_model_paths(plan, model_root, hf_cache_root, path):
-    """One `extra_model_paths` section per HF snapshot repo used, plus the COMFY_MODEL_ROOT fallback."""
+def write_model_paths(plan, model_root, hf_cache_root, path, model_store_root=None):
+    """One `extra_model_paths` section per HF repo used, plus the COMFY_MODEL_ROOT fallback.
+
+    Each repo's section points at the RunPod cached-model mount when it is present on disk,
+    else falls back to the HF cache snapshot layout (unchanged behavior).
+    """
+    if model_store_root is None:
+        model_store_root = MODEL_STORE_ROOT
     config = {}
     for item in plan.values():
         hf = item.get('hf')
         if not hf:
             continue
-        base = resolve_snapshot_dir(hf_cache_root, hf['repo'], hf.get('revision'))
+        store_dir = resolve_model_store_dir(model_store_root, hf['repo'], hf.get('revision'))
+        base = store_dir if store_dir.is_dir() else resolve_snapshot_dir(hf_cache_root, hf['repo'], hf.get('revision'))
         key = 'hf_' + re.sub(r'[^a-z0-9]+', '_', hf['repo'].lower()).strip('_')
         category = Path(item['path']).parts[0]
         section = config.setdefault(key, {'base_path': str(base)})

@@ -1,7 +1,7 @@
 # Machine-checkable pins for the runpod-senai-worker contract.
 # Human-readable rationale lives in CONTRACT.md — this file is the numbers only.
 
-contract_version: "0.2.1"
+contract_version: "0.2.2"
 protocol: "senai-worker/1"
 
 producer:
@@ -119,7 +119,7 @@ env:
   - {key: AWS_DEFAULT_REGION, required: true, production_value: "auto"}
   - {key: AWS_ENDPOINT_URL, required: true, note: "R2 endpoint, same as vavo endpoint"}
   # new in senai-worker/1
-  - {key: HF_CACHE_ROOT, default: "/runpod-volume/huggingface-cache/hub"}
+  - {key: HF_CACHE_ROOT, default: "/runpod-volume/huggingface-cache/hub", note: "cadangan layout huggingface_hub; lokasi utama adalah mount /runpod/model-store/huggingface/<org>/<repo>/<revision>/ (path tetap, bukan env)"}
   - {key: REFRESH_WORKER, default: "dirty", allowed: ["dirty", "always", "never"]}
   - {key: LEGACY_UPSTREAM_INPUT, default: "false"}
   - {key: INPUT_ALLOWED_HOSTS, default: "", note: "empty rejects every url input"}

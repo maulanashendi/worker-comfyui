@@ -39,6 +39,16 @@ def write_snapshot_file(hf_cache_root, hf, size):
     return path
 
 
+def write_store_file(store_root, hf, size):
+    """A sparse RunPod cached-model mount file for one `hf` model pin: <store_root>/<org>/<repo>/<revision>/<hf.file>."""
+    path = models.resolve_model_store_dir(store_root, hf['repo'], hf.get('revision')) / hf['file']
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('wb') as stream:
+        if size:
+            stream.truncate(size)
+    return path
+
+
 def write_manifest_snapshots(hf_cache_root, plan):
     """Sparse HF cache snapshots for every hf-sourced item in a resolved `plan`,
     sized to each item's declared `bytes` (0 -> empty file, size check skipped)."""
@@ -469,6 +479,153 @@ def test_default_download_policy_is_cache_only(tmp_path, monkeypatch):
         models.main()
     download_all.assert_not_called()
     get.assert_not_called()
+
+
+# --- model-store (RunPod cached-model mount) candidate ------------------
+
+def _store_item():
+    hf = {'repo': 'Org/Repo', 'revision': 'a' * 40, 'file': 'vae/a.safetensors'}
+    return {'path': 'vae/a.safetensors', 'hf': hf, 'sha256': None, 'bytes': 7}
+
+
+def test_find_model_file_prefers_model_store(tmp_path):
+    item = _store_item()
+    store_root = tmp_path / 'store'
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    store_path = write_store_file(store_root, item['hf'], size=7)
+
+    found = models.find_model_file(item, hf_cache_root, model_root, model_store_root=store_root)
+    assert found == store_path
+
+
+def test_find_model_file_model_store_wins_over_hf_snapshot(tmp_path):
+    item = _store_item()
+    store_root = tmp_path / 'store'
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    store_path = write_store_file(store_root, item['hf'], size=7)
+    write_snapshot_file(hf_cache_root, item['hf'], size=7)
+
+    found = models.find_model_file(item, hf_cache_root, model_root, model_store_root=store_root)
+    assert found == store_path
+
+
+def test_find_model_file_falls_back_to_hf_snapshot(tmp_path):
+    item = _store_item()
+    store_root = tmp_path / 'store'
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    snapshot_path = write_snapshot_file(hf_cache_root, item['hf'], size=7)
+
+    found = models.find_model_file(item, hf_cache_root, model_root, model_store_root=store_root)
+    assert found == snapshot_path
+
+
+def test_find_model_file_falls_back_to_model_root(tmp_path):
+    item = _store_item()
+    store_root = tmp_path / 'store'
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    target = models.contained(model_root, item['path'])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open('wb') as stream:
+        stream.truncate(7)
+
+    found = models.find_model_file(item, hf_cache_root, model_root, model_store_root=store_root)
+    assert found == target
+
+
+def test_write_model_paths_uses_model_store_when_present(tmp_path):
+    item = _store_item()
+    store_root = tmp_path / 'store'
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    write_store_file(store_root, item['hf'], size=7)
+    store_dir = models.resolve_model_store_dir(store_root, item['hf']['repo'], item['hf']['revision'])
+    plan = {models.contained(model_root, item['path']): item}
+    paths_path = tmp_path / 'paths.yaml'
+
+    models.write_model_paths(plan, model_root, hf_cache_root, paths_path, model_store_root=store_root)
+
+    config = yaml.safe_load(paths_path.read_text())
+    section = config['hf_org_repo']
+    assert section['base_path'] == str(store_dir)
+
+
+def _verify_env(monkeypatch, tmp_path, workflow_dir, manifest, model_root, hf_cache_root, aws_bucket='staging'):
+    monkeypatch.setenv('WORKFLOWS', manifest)
+    monkeypatch.setenv('WORKFLOW_DIR', str(workflow_dir))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
+    monkeypatch.setenv('HF_CACHE_ROOT', str(hf_cache_root))
+    if aws_bucket is None:
+        monkeypatch.delenv('AWS_BUCKET_NAME', raising=False)
+    else:
+        monkeypatch.setenv('AWS_BUCKET_NAME', aws_bucket)
+    monkeypatch.setenv('SENAI_WORKER_STATE', str(tmp_path / 'state.json'))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+
+def _single_model_manifest(tmp_path, item):
+    manifest_path = tmp_path / 'm.yaml'
+    manifest_path.write_text(yaml.safe_dump({
+        'version': 2, 'set': 'x', 'requires_comfyui': '>=0.36.0', 'custom_nodes': [],
+        'workflows': [], 'allowed_class_types_extra': [], 'limits': {}, 'warmup_graph': None,
+        'models': [item],
+    }))
+    return manifest_path
+
+
+def test_verify_ready_with_model_store_only(tmp_path, monkeypatch):
+    store_root = tmp_path / 'store'
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    item = _store_item()
+    _single_model_manifest(tmp_path, item)
+    write_store_file(store_root, item['hf'], size=item['bytes'])
+
+    _verify_env(monkeypatch, tmp_path, tmp_path, 'm.yaml', model_root, hf_cache_root)
+    monkeypatch.setattr(models, 'MODEL_STORE_ROOT', store_root)
+
+    state = models.run_verify()
+
+    assert state['ready'] is True
+    assert state['models']['present'] == state['models']['declared'] == 1
+    assert state['models']['missing'] == []
+
+
+def test_verify_missing_everywhere(tmp_path, monkeypatch):
+    store_root = tmp_path / 'store'
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    item = _store_item()
+    _single_model_manifest(tmp_path, item)
+
+    _verify_env(monkeypatch, tmp_path, tmp_path, 'm.yaml', model_root, hf_cache_root)
+    monkeypatch.setattr(models, 'MODEL_STORE_ROOT', store_root)
+
+    state = models.run_verify()
+
+    assert state['ready'] is False
+    assert state['unready_code'] == 'MODEL_CACHE_MISSING'
+    assert item['path'] in state['models']['missing']
+
+
+def test_verify_model_store_wrong_size_marks_missing(tmp_path, monkeypatch):
+    store_root = tmp_path / 'store'
+    hf_cache_root = tmp_path / 'hf-cache'
+    model_root = tmp_path / 'comfy-models'
+    item = _store_item()
+    _single_model_manifest(tmp_path, item)
+    write_store_file(store_root, item['hf'], size=1)
+
+    _verify_env(monkeypatch, tmp_path, tmp_path, 'm.yaml', model_root, hf_cache_root)
+    monkeypatch.setattr(models, 'MODEL_STORE_ROOT', store_root)
+
+    state = models.run_verify()
+
+    assert state['ready'] is False
+    assert item['path'] in state['models']['missing']
 
 
 def test_ltx_workflow_canonical_sha256_matches_contract_pins():

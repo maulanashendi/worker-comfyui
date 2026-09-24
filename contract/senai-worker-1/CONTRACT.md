@@ -1,7 +1,7 @@
 # Kontrak: RunPod senai-worker (protokol `senai-worker/1`)
 
 Status: **draft mengikat** (lihat urutan otoritas di `contracts/README.md`).
-Versi: `0.2.1` — lihat `pins.yaml` dan `CHANGELOG.md`.
+Versi: `0.2.2` — lihat `pins.yaml` dan `CHANGELOG.md`.
 
 Kontrak ini adalah spesifikasi yang dipakai **kedua sisi** untuk implementasi paralel:
 worker (`maulanashendi/worker-comfyui`, fork `runpod-workers/worker-comfyui`) dan senai
@@ -285,10 +285,14 @@ Daftar mesin-terbaca ada di `pins.yaml` (`env`). Yang wajib di setiap endpoint s
 | --- | --- | --- |
 | `WORKFLOWS` | `ltx25.yaml` atau `minimax-h3.yaml` | Selektor set. Hanya manifest yang disebut yang dibaca. |
 | `MODEL_DOWNLOAD_POLICY` | `cache-only` | Worker GPU tidak pernah mengunduh bobot. |
-| `HF_CACHE_ROOT` | default `/runpod-volume/huggingface-cache/hub` | Root cached model Hugging Face RunPod. |
+| `HF_CACHE_ROOT` | default `/runpod-volume/huggingface-cache/hub` | Cadangan layout `huggingface_hub` (mis. network volume), dipakai kalau mount cached model RunPod tidak ada. |
 | `AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION=auto`, `AWS_ENDPOINT_URL` | R2 staging | Nama sama dengan endpoint vavo. Tanpa bucket, worker masuk mode unready dengan `OUTPUT_NOT_CONFIGURED`, dan tidak pernah mengirim base64. |
 | `INPUT_ALLOWED_HOSTS` | host R2 bucket aset senai | Daftar host dipisah koma. Kosong → semua input `url` ditolak. |
 | `REFRESH_WORKER` | `dirty` | `dirty` (default baru) \| `always` \| `never` |
+
+Lokasi utama untuk bobot cached model adalah mount RunPod
+`/runpod/model-store/huggingface/<org>/<repo>/<revision>/` — path tetap, bukan env var.
+`HF_CACHE_ROOT` di atas hanya cadangan kalau mount itu tidak ada.
 
 Manifest set format v2 (`workflow/<set>.yaml` di repo worker):
 
@@ -315,9 +319,12 @@ models:
   pertama. String dengan whitespace, misalnya prompt yang kebetulan berakhiran `.pt`, bukan
   rujukan model (seperti `load_plan` sekarang) dari model di
   manifest. Kalau tidak → `MODEL_NOT_IN_MANIFEST`.
-- **Verifikasi boot**: setiap model harus ada dengan ukuran = `bytes`, di bawah
-  `HF_CACHE_ROOT/models--<org>--<repo>/snapshots/<revision>/<file>`, atau di `COMFY_MODEL_ROOT`
-  untuk jalur cadangan. Kalau tidak → mode unready `MODEL_CACHE_MISSING`.
+- **Verifikasi boot**: setiap model harus ada dengan ukuran = `bytes`, dicek berurutan di tiga
+  kandidat lokasi: (1) mount cached model RunPod
+  `/runpod/model-store/huggingface/<org>/<repo>/<revision>/<file>`, (2)
+  `HF_CACHE_ROOT/models--<org>--<repo>/snapshots/<revision>/<file>`, (3) `COMFY_MODEL_ROOT`
+  untuk jalur cadangan. Kandidat pertama yang ada di disk dipakai. Kalau tidak ada satu pun →
+  mode unready `MODEL_CACHE_MISSING`.
 
 ## 8. Pin graph
 
@@ -347,5 +354,5 @@ ditulis tangan.
 | `refresh_worker` benar-benar memensiunkan worker; `progress_update` terlihat di `/status` | G1 |
 | `/cancel` pada `IN_PROGRESS` menghentikan handler | G1 |
 | Gaya host URL presign R2 cocok dengan `allowed_output_hosts` | G2 |
-| Layout snapshot cached model HF sesuai §7, dan ukuran berkas = metadata LFS | G4 |
+| Mount cached model RunPod `/runpod/model-store/huggingface/<org>/<repo>/<commit>/` memuat struktur berkas repo apa adanya, dan ukuran = metadata LFS (mountPath sudah terlihat di `model-status` 2026-09-23; isi mount belum) | G4 |
 | Cold start, VRAM puncak, durasi per tahap di GPU 48 GB | G5, G7 |

@@ -1,5 +1,18 @@
 # Changelog — kontrak runpod-senai-worker
 
+## 0.2.2 — 2026-09-23
+
+Klarifikasi dari verifikasi `runpodctl serverless model-status`, tanpa perubahan bentuk kabel:
+
+- §7: lokasi utama cached model adalah mount RunPod
+  `/runpod/model-store/huggingface/<org>/<repo>/<revision>/` (path tetap, bukan env var).
+  `HF_CACHE_ROOT` sekarang dijelaskan sebagai cadangan layout `huggingface_hub`.
+- §7 "Verifikasi boot": urutan tiga kandidat lokasi — mount cached model RunPod, lalu
+  `HF_CACHE_ROOT` snapshot, lalu `COMFY_MODEL_ROOT`.
+- §10 G4: klaim diperbarui — mount `/runpod/model-store/huggingface/<org>/<repo>/<commit>/`
+  sudah terlihat lewat `model-status`; isi mount (struktur berkas apa adanya, ukuran = metadata
+  LFS) belum diverifikasi.
+
 ## 0.2.1 — 2026-09-23
 
 Klarifikasi dari review implementasi, tanpa perubahan bentuk kabel:

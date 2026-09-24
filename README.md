@@ -189,7 +189,7 @@ worker — dispatch ditentukan oleh `input.protocol` pada tiap request; endpoint
 hanya perlu env berikut selain env pemilihan workflow di atas:
 
 ```dotenv
-HF_CACHE_ROOT=/runpod-volume/huggingface-cache/hub   # default, sesuaikan bila beda
+HF_CACHE_ROOT=/runpod-volume/huggingface-cache/hub   # cadangan; lokasi utama adalah mount /runpod/model-store/huggingface/
 AWS_BUCKET_NAME=your-output-bucket
 AWS_ACCESS_KEY_ID=***
 AWS_SECRET_ACCESS_KEY=***
@@ -202,9 +202,10 @@ REFRESH_WORKER=dirty
 Untuk deployment Senai, bobot **bukan** diisi lewat langkah 4–5 di atas (network
 volume yang disiapkan manual): produksi memakai fitur **cached model Hugging
 Face RunPod** — repo HF yang dipilih di template endpoint, dicache RunPod di
-`HF_CACHE_ROOT/models--<org>--<repo>/snapshots/<revision>/<file>`. Boot
-memverifikasi keberadaan tiap file dengan `stat` (ukuran cocok manifest), tanpa
-menghitung ulang hash. Cache yang kurang tidak membuat worker crash-loop;
+mount `/runpod/model-store/huggingface/<org>/<repo>/<revision>/<file>`, dengan
+`HF_CACHE_ROOT/models--<org>--<repo>/snapshots/<revision>/<file>` sebagai
+cadangan. Boot memverifikasi keberadaan tiap file dengan `stat` (ukuran cocok
+manifest), tanpa menghitung ulang hash. Cache yang kurang tidak membuat worker crash-loop;
 worker tetap boot dalam **mode unready** (`ready:false`, kode
 `MODEL_CACHE_MISSING`/`OUTPUT_NOT_CONFIGURED`) dan menjawab tiap job dengan
 kode itu, supaya operator melihat penyebabnya lewat `/health` alih-alih retry

@@ -105,9 +105,12 @@ native "cached model" feature:
 | `ltx25.yaml` | `Lightricks/LTX-2.5` (gated — requires `HF_TOKEN`), `Comfy-Org/gemma-4` |
 | `minimax-h3.yaml` | `Comfy-Org/MiniMax-H3`, `Comfy-Org/SDPose` |
 
-RunPod caches the selected repos under `HF_CACHE_ROOT` (default
-`/runpod-volume/huggingface-cache/hub`), laid out as
-`models--<org>--<repo>/snapshots/<revision>/<file>`. Production always runs
+RunPod caches the selected repos under the RunPod cached-model mount
+`/runpod/model-store/huggingface/<org>/<repo>/<revision>/<file>` (fixed path,
+not an env var), with `HF_CACHE_ROOT` (default
+`/runpod-volume/huggingface-cache/hub`, laid out as
+`models--<org>--<repo>/snapshots/<revision>/<file>`) as a fallback for the
+`huggingface_hub` layout. Production always runs
 with `MODEL_DOWNLOAD_POLICY=cache-only`: the GPU worker never downloads
 weights itself, it only reads what RunPod already cached.
 
@@ -132,14 +135,14 @@ truth. Do not add new env vars without updating that file first.
 | `MODEL_DOWNLOAD_POLICY` | — (wajib) | `cache-only` | Worker GPU tidak pernah mengunduh bobot. |
 | `PREPARE_MODELS_ONLY` | `false` | `false` | Hanya dipakai di job preparation terpisah, tidak di endpoint serving. |
 | `MODEL_DOWNLOAD_CHECK_ONLY` | `false` | `false` | Idem, dipakai untuk mencetak checklist saja. |
-| `COMFY_MODEL_ROOT` | `/runpod-volume/models` bila termount, selain itu `/comfyui/models` | (default) | Jalur cadangan model bila tidak ada di `HF_CACHE_ROOT`. |
+| `COMFY_MODEL_ROOT` | `/runpod-volume/models` bila termount, selain itu `/comfyui/models` | (default) | Jalur cadangan model bila tidak ada di mount cached model RunPod maupun `HF_CACHE_ROOT`. |
 | `COMFY_LOG_LEVEL` | `INFO` | `INFO` | Default fork sebelumnya adalah `DEBUG`. |
 | `AWS_BUCKET_NAME` | — (wajib) | bucket R2 staging | Tanpa ini, boot masuk mode unready `OUTPUT_NOT_CONFIGURED`. |
 | `AWS_ACCESS_KEY_ID` | — (wajib) | secret endpoint | Jangan ditulis di dokumen atau log. |
 | `AWS_SECRET_ACCESS_KEY` | — (wajib) | secret endpoint | Jangan ditulis di dokumen atau log. |
 | `AWS_DEFAULT_REGION` | — (wajib) | `auto` | R2 memakai `auto`. |
 | `AWS_ENDPOINT_URL` | — (wajib) | endpoint R2, sama dengan endpoint vavo | Dibaca botocore sendiri; jangan hardcode di kode. |
-| `HF_CACHE_ROOT` | `/runpod-volume/huggingface-cache/hub` | (default) | Root cached model Hugging Face RunPod. |
+| `HF_CACHE_ROOT` | `/runpod-volume/huggingface-cache/hub` | (default) | Cadangan layout `huggingface_hub`; lokasi utama adalah mount `/runpod/model-store/huggingface/<org>/<repo>/<revision>/`. |
 | `REFRESH_WORKER` | `dirty` | `dirty` | `dirty` \| `always` \| `never`. `dirty` mempensiunkan worker hanya pada error dengan `refresh: true` (tabel §5 kontrak). |
 | `LEGACY_UPSTREAM_INPUT` | `false` | `false` | Jalur upstream lama (`input.workflow` + `input.images` tanpa `protocol`). Tidak pernah `true` di endpoint Senai. |
 | `INPUT_ALLOWED_HOSTS` | `""` | host bucket aset Senai (dipisah koma) | Kosong berarti setiap `inputs[].url` ditolak `INPUT_HOST_REJECTED`. |
