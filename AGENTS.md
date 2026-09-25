@@ -3,6 +3,17 @@
 
 ---
 
+## Phase rule: prove the model runs first, build the harness later
+
+Pick the architecture by phase. If it is unclear which phase a task is in, or whether a model has graduated, ask the user instead of guessing.
+
+- **Before R&D**: check whether the model is already sold through an API (e.g. Higgsfield), and compare its price at the *same* resolution. Self-hosting pays off only in two cases: the API lacks a capability we need (custom graph, LoRA, fine-tune), or volume is steady enough that the savings cover the fixed costs (active workers, billed failures, maintenance). On 2026-09-25, H3 and LTX failed this test (senai `docs/journal/2026-09-25-self-host-h3-ltx-kalah-dari-higgsfield.md`).
+
+- **R&D phase**: a new model, workflow or custom node that has not yet produced a correct output on a RunPod GPU. The only goal is to show whether it runs. Use the shortest path: a GPU Pod, or a worker from the generic image with `MODEL_DOWNLOAD_POLICY=missing` that downloads weights to container disk at boot.
+  - Do not use a network volume, baked weights, an HF mirror or RunPod cached models, and do not pin manifests, change the contract or tune `cache-only` readiness. Each of these turns one smoke test into a rebuild or an infra setup.
+  - Traps: `cache-only` is the default, so set `missing` explicitly. Without `AWS_BUCKET_NAME`, the worker boots unready (`OUTPUT_NOT_CONFIGURED`) even when the models are fine.
+- **Harness phase**: begins only after the real workflow has run repeatedly on the target GPU class with no errors and no manual fixes between runs, *and* the user has confirmed it is stable. Only then choose weight storage (cached model, HF mirror, network volume or baked), pin `sha256`/`bytes`, and switch to `cache-only` behind the contract.
+
 ## Non-obvious constraints
 
 - **No hot-reload**: handler.py, start.sh, and network_volume.py are `ADD`ed into the Docker image at build time (to `/`). Any change requires a full `docker build` before testing with docker-compose.
