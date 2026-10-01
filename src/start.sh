@@ -160,6 +160,11 @@ if [ -n "$whitelist_nodes" ]; then
     # shellcheck disable=SC2086 # word-split on purpose: one arg per node folder name
     comfy_args+=(--whitelist-custom-nodes $whitelist_nodes)
 fi
+if [ "$SENAI_TRANSPORT" = "cloudrun" ]; then
+    # Cloud Run serves weights from a GCSFuse mount: mmap turns safetensors loads
+    # into small random reads (~2-4 MB/s observed); a plain read streams sequentially.
+    comfy_args+=(--disable-mmap)
+fi
 handler_args=()
 if [ "${SERVE_API_LOCALLY:-false}" = "true" ]; then
     comfy_args+=(--listen)
