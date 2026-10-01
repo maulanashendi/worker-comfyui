@@ -82,7 +82,7 @@
       "title": "Prompt"
     },
     "inputs": {
-      "value": "Reference sheet: Left (Character): a person shown as a face close-up and a full-body turnaround. Right (Prop): a product shown front, side and three-quarter. Generated video: The person holds up the product toward the camera in a steady medium shot and smiles. Soft natural daylight."
+      "value": "Reference sheet: Left (Character): a person shown as a face close-up and a full-body turnaround. Right (Prop): a product shown front, side and three-quarter.\n\nGenerated video: A steady medium shot of the person from the left panel, wearing the same outfit, standing in a bright room. The person holds up the product from the right panel toward the camera and smiles. Soft natural daylight."
     }
   },
   "398:364": {

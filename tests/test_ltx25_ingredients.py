@@ -90,6 +90,29 @@ def test_graph_avoids_forbidden_nodes_and_bf16_transformer():
     assert len([v for v in GRAPH['398:397']['inputs']['sigmas'].split(',')]) == 9  # 8 steps
 
 
+def test_reference_path_matches_upstream_example():
+    # Lightricks/ComfyUI-LTXVideo@5722b53 Ingredients example and the LoRA card: the sheet is a
+    # *static video* (still repeated to the clip length) at the output size, added as one
+    # IC-LoRA guide at frame 0 with strength 1, and the guide frames are cropped before decode.
+    inp = lambda nid: GRAPH[nid]['inputs']
+    assert inp('398:351')['input'] == ['395', 0]
+    assert [inp('398:351')['resize_type.width'], inp('398:351')['resize_type.height']] == [['398:372', 0], ['398:360', 0]]
+    assert inp('398:901') == {'image': ['398:351', 0], 'amount': ['398:378', 1]}
+    assert inp('398:356')['length'] == ['398:378', 1]
+    guide = inp('398:902')
+    assert guide['image'] == ['398:901', 0] and guide['latent'] == ['398:356', 0]
+    assert guide['frame_idx'] == 0 and guide['strength'] == 1.0 and guide['crop'] == 'disabled'
+    assert guide['latent_downscale_factor'] == ['398:900', 1]
+    assert inp('398:900')['strength_model'] == 1.0
+    assert inp('398:903')['model'] == ['398:900', 0]
+    assert inp('398:903')['positive'] == ['398:902', 0] and inp('398:903')['cfg'] == 1.0
+    assert inp('398:377')['video_latent'] == ['398:902', 2]
+    assert inp('398:904')['latent'] == ['398:367', 0] and inp('398:374')['samples'] == ['398:904', 2]
+    assert inp('398:352')['sampler_name'] == 'euler_ancestral_cfg_pp'
+    prompt = inp('398:376')['value']
+    assert prompt.startswith('Reference sheet: ') and '\n\nGenerated video: ' in prompt
+
+
 def test_combined_with_ltx25_shares_models_without_conflict(tmp_path):
     manifests = models.load_manifests('ltx25.yaml,ltx25-ingredients.yaml', WORKFLOW_DIR, tmp_path)
     assert len(manifests.plan) == 7

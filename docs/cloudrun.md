@@ -249,7 +249,19 @@ Reference-sheet guidance (from the model card):
   out of distribution; keep ≥121 frames. Portrait 448×768 is untested.
 - Two-part prompt: `Reference sheet: <each panel by position>` then
   `Generated video: <action, shot, dialogue>`. Default negative:
-  `worst quality, inconsistent motion, blurry, jittery, distorted`.
+  `worst quality, inconsistent motion, blurry, jittery, distorted`. Separate
+  the two parts with a blank line, and in `Generated video:` describe each
+  element again in full (as the card's examples do) instead of "the same woman".
+
+The sheet is fed exactly as upstream does it: repeated to the clip length
+(`RepeatImageBatch`, the card's "static video") into one
+`LTXAddVideoICLoRAGuide` at `frame_idx` 0, strength 1, then cropped out with
+`LTXVCropGuides`. Seen on GPU (2026-10-01): a sheet made of two full-bleed photos
+(a portrait with its own backdrop next to a product shot with its own studio set,
+no black background, no location panel) came back as the same split-screen layout
+for the whole clip, with the person animated inside her panel. The LoRA was
+active; the sheet looked like a video frame rather than a reference sheet. Cut
+each element out onto black and add a location panel before blaming the graph.
 
 ## LTX 2.5 motion transfer set (`ltx25-motion.yaml`)
 
