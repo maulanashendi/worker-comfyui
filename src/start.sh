@@ -116,6 +116,24 @@ fi
 echo "worker-comfyui: GPU available — $GPU_CHECK"
 record_stage gpu_check
 
+# Cloud Run: ComfyUI's loader reads safetensors in small random chunks, which a
+# GCSFuse mount serves at ~2 MB/s. Stage the HF cache into the in-memory
+# filesystem with parallel sequential copies first (~550 MB/s per stream over
+# Direct VPC + enable-buffered-read), then point the verifier and ComfyUI at the
+# copy. A failed copy keeps the mount as HF_CACHE_ROOT so boot still proceeds.
+if [ "$SENAI_TRANSPORT" = "cloudrun" ] && [ -d "${HF_CACHE_ROOT:-}" ]; then
+    stage_dir=/tmp/hf-stage/hub
+    echo "worker-comfyui: staging $HF_CACHE_ROOT into $stage_dir"
+    if (cd "$HF_CACHE_ROOT" && find . -type f -print0 \
+        | xargs -0 -P 8 -I{} sh -c 'mkdir -p "$(dirname "$1/$2")" && cp "$2" "$1/$2"' _ "$stage_dir" {}); then
+        export HF_CACHE_ROOT="$stage_dir"
+        echo "worker-comfyui: staged $(du -sb "$stage_dir" | cut -f1) bytes"
+    else
+        echo "worker-comfyui: model staging failed; reading from $HF_CACHE_ROOT directly" >&2
+    fi
+    record_stage model_stage
+fi
+
 # ---------------------------------------------------------------------------
 # Model stage
 # cache-only (production): verify only, never download.
@@ -161,9 +179,9 @@ if [ -n "$whitelist_nodes" ]; then
     comfy_args+=(--whitelist-custom-nodes $whitelist_nodes)
 fi
 if [ "$SENAI_TRANSPORT" = "cloudrun" ]; then
-    # Cloud Run serves weights from a GCSFuse mount: mmap turns safetensors loads
-    # into small random reads (~2-4 MB/s observed); a plain read streams sequentially.
-    comfy_args+=(--disable-mmap)
+    # Weights are staged in memory (above), so mmap is cheap and avoids a second
+    # in-RAM copy; 96 GB of VRAM holds the whole LTX set between jobs.
+    comfy_args+=(--highvram)
 fi
 handler_args=()
 if [ "${SERVE_API_LOCALLY:-false}" = "true" ]; then
