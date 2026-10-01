@@ -125,14 +125,23 @@ class SenaiCloudRunHandler(BaseHTTPRequestHandler):
             _RUN_LOCK.release()
 
 
-def main():
-    port = int(os.environ.get("PORT", "8080"))
-    handler_module._BOOT_STATE = senai_worker.boot(
+def boot_from_env():
+    """Boot senai_worker the same way for every Cloud Run transport (HTTP or job).
+
+    Shared by this module's main() and cloudrun_job.main() so both read the
+    same env vars and populate handler_module._BOOT_STATE identically.
+    """
+    return senai_worker.boot(
         state_path=Path(os.environ.get("SENAI_WORKER_STATE", "/tmp/senai-worker-state.json")),
         timeline_path=Path(os.environ.get("SENAI_BOOT_TIMELINE", "/tmp/senai-boot-timeline")),
         comfy=handler_module.COMFY_CLIENT,
         ready_timeout_sec=float(os.environ.get("COMFY_READY_TIMEOUT_SEC", "300")),
     )
+
+
+def main():
+    port = int(os.environ.get("PORT", "8080"))
+    handler_module._BOOT_STATE = boot_from_env()
     server = ThreadingHTTPServer(("0.0.0.0", port), SenaiCloudRunHandler)
     logger.info("senai-worker cloudrun transport listening on 0.0.0.0:%d", port)
     server.serve_forever()

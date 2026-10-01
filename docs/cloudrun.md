@@ -109,3 +109,91 @@ GPU / health-check docs on 2026-10-01:
 A generous `failureThreshold` on the startup probe is intentional: cold model
 load + ComfyUI boot can take minutes (see `h3-viability-validation` notes:
 boot budget must fit the product's job-latency ceiling).
+
+## Job mode (`SENAI_TRANSPORT=cloudrun-job`)
+
+Documentation only — this describes a deploy that has not been run. Same
+caveats as above: no `docker build`/`push`/`gcloud` from this doc without
+separate, explicit approval.
+
+A Cloud Run **service** keeps the GPU instance billed for 5-17 minutes after
+the last request (`--no-cpu-throttling` plus Cloud Run's own idle-instance
+teardown window), and that tail is not configurable. Job mode trades the
+always-listening HTTP server for a **Cloud Run Jobs execution** that boots the
+same way (`senai_worker.boot()`, same model staging, same `comfy_args`), then
+drains a small file queue on a mounted GCS bucket and exits once the queue has
+been empty for `IDLE_EXIT_SEC` — so the idle tail is ours to choose instead of
+Cloud Run's.
+
+Each queued request runs through the exact same `handler.handler(job)` as the
+`runpod` and `cloudrun` transports; the senai-worker/1 request/response shape
+is unchanged.
+
+### Environment variables (job mode)
+
+All env vars from the HTTP `cloudrun` mode above apply unchanged (`HF_CACHE_ROOT`,
+`MODEL_DOWNLOAD_POLICY`, `COMFY_READY_TIMEOUT_SEC`, etc.), except there is no
+`PORT`/HTTP surface. Job mode adds:
+
+| Env | Default | Notes |
+| --- | --- | --- |
+| `SENAI_TRANSPORT` | — | Set to `cloudrun-job` to launch `cloudrun_job.py` instead of `cloudrun_server.py`. |
+| `QUEUE_DIR` | `/queue` | Root of the file queue; expects a GCS FUSE mount with `pending/`, `claimed/`, `done/`, `heartbeat/` subdirectories (created on boot if missing). |
+| `IDLE_EXIT_SEC` | `60` | Exit 0 once `pending/` has been empty for this many seconds, measured since the last job finished (or since boot if none ran). |
+| `QUEUE_POLL_SEC` | `2` | Poll interval for new files in `pending/`. |
+| `CLOUD_RUN_EXECUTION` | set by Cloud Run | Used (falling back to hostname) to name this execution's `heartbeat/<name>.json` file. |
+
+No new dependencies: `cloudrun_job.py` uses only the Python standard library.
+
+### Queue layout
+
+```
+QUEUE_DIR/
+  pending/<id>.json    # enqueuer writes {"input": {...}} here (same shape as POST /run)
+  claimed/<id>.json    # in-flight: claimed via os.rename(pending/<id>.json, claimed/<id>.json)
+  done/<id>.json        # {"id", "status": "COMPLETED"|"FAILED", "output"|"error"}, written atomically
+  heartbeat/<exec>.json # {"ts", "state": "booting"|"idle"|"busy", "processed"}, refreshed every ~10s
+```
+
+Files are claimed oldest-first (by mtime, then name) with `os.rename`, so two
+concurrent executions racing the same file have exactly one winner; the loser
+sees `FileNotFoundError` and moves on. A `refresh_worker` result from the
+handler finishes writing its `done/` file and then exits the execution
+immediately, leaving the rest of the queue for the next execution.
+
+### Deploy and enqueue commands (document only — do not run)
+
+```bash
+gcloud run jobs create worker-comfyui-job \
+  --image us-central1-docker.pkg.dev/senfers/senfers-workers/worker-comfyui:<tag> \
+  --region us-central1 \
+  --gpu 1 \
+  --gpu-type nvidia-rtx-pro-6000 \
+  --no-gpu-zonal-redundancy \
+  --cpu 20 \
+  --memory 80Gi \
+  --task-timeout 3600 \
+  --max-retries 0 \
+  --network default \
+  --subnet default \
+  --vpc-egress all-traffic \
+  --service-account worker-comfyui@senfers.iam.gserviceaccount.com \
+  --set-env-vars SENAI_TRANSPORT=cloudrun-job,MODEL_DOWNLOAD_POLICY=cache-only,HF_CACHE_ROOT=/models/hub,WORKFLOWS=ltx25.yaml \
+  --add-volume name=models,type=cloud-storage,bucket=senfers-models-usc1,readonly=true \
+  --add-volume-mount volume=models,mount-path=/models \
+  --add-volume name=queue,type=cloud-storage,bucket=senfers-jobs-usc1,mount-options=metadata-cache-ttl-secs=0 \
+  --add-volume-mount volume=queue,mount-path=/queue
+
+# Enqueue a request:
+gcloud storage cp req.json gs://senfers-jobs-usc1/pending/<id>.json
+
+# Trigger an execution to drain the queue:
+gcloud run jobs execute worker-comfyui-job --region us-central1
+```
+
+The queue volume is mounted read-write (no `readonly=true`), unlike the models
+volume, since the execution writes `claimed/`, `done/`, and `heartbeat/`
+entries back to the bucket. `metadata-cache-ttl-secs=0` on the queue mount
+keeps `pending/` listings fresh across concurrent executions and the
+out-of-band `gcloud storage cp` that enqueues work; the read-only models mount
+has no such requirement.

@@ -121,7 +121,7 @@ record_stage gpu_check
 # filesystem with parallel sequential copies first (~550 MB/s per stream over
 # Direct VPC + enable-buffered-read), then point the verifier and ComfyUI at the
 # copy. A failed copy keeps the mount as HF_CACHE_ROOT so boot still proceeds.
-if [ "$SENAI_TRANSPORT" = "cloudrun" ] && [ -d "${HF_CACHE_ROOT:-}" ]; then
+if { [ "$SENAI_TRANSPORT" = "cloudrun" ] || [ "$SENAI_TRANSPORT" = "cloudrun-job" ]; } && [ -d "${HF_CACHE_ROOT:-}" ]; then
     stage_dir=/tmp/hf-stage/hub
     echo "worker-comfyui: staging $HF_CACHE_ROOT into $stage_dir"
     if (cd "$HF_CACHE_ROOT" && find . -type f -print0 \
@@ -178,7 +178,7 @@ if [ -n "$whitelist_nodes" ]; then
     # shellcheck disable=SC2086 # word-split on purpose: one arg per node folder name
     comfy_args+=(--whitelist-custom-nodes $whitelist_nodes)
 fi
-if [ "$SENAI_TRANSPORT" = "cloudrun" ]; then
+if [ "$SENAI_TRANSPORT" = "cloudrun" ] || [ "$SENAI_TRANSPORT" = "cloudrun-job" ]; then
     # Weights are staged in memory (above), so mmap is cheap and avoids a second
     # in-RAM copy; 96 GB of VRAM holds the whole LTX set between jobs. Cloud Run
     # pins 20 vCPU to exactly 80 GiB, so skip the ~64 GB pinned offload buffer
@@ -197,6 +197,9 @@ record_stage comfy_start
 if [ "$SENAI_TRANSPORT" = "cloudrun" ]; then
     echo "worker-comfyui: Starting Cloud Run HTTP transport"
     python -u "$WORKER_ROOT/cloudrun_server.py" &
+elif [ "$SENAI_TRANSPORT" = "cloudrun-job" ]; then
+    echo "worker-comfyui: Starting Cloud Run Jobs queue-drain transport"
+    python -u "$WORKER_ROOT/cloudrun_job.py" &
 else
     echo "worker-comfyui: Starting RunPod Handler"
     python -u "$WORKER_ROOT/handler.py" "${handler_args[@]}" "$@" &
