@@ -173,3 +173,21 @@ def test_idle_exit_watchdog_waits_while_job_runs():
     thread.join(2)
     assert exits == [0]
     cloudrun_server._RUN_LOCK.release()
+
+
+def test_collect_outputs_skips_input_echoes(tmp_path):
+    import media_output
+    out = tmp_path / "video.mp4"
+    out.write_bytes(b"x")
+    seen = []
+    history = {
+        "396": {"videos": [{"filename": "driving.mp4", "subfolder": "senai/job", "type": "input"}]},
+        "75": {"videos": [{"filename": "video.mp4", "subfolder": "", "type": "output"}]},
+    }
+    with patch.object(media_output, "probe_media", return_value={"media_type": "video/mp4"}), \
+         patch.object(media_output, "_upload", return_value="https://r2/x"):
+        entries = media_output.collect_outputs(
+            history, resolve_path=lambda f, s, t: seen.append((f, t)) or out, trace=None, rp_job_id="j",
+            s3_client=object(), bucket="b")
+    assert [e["node_id"] for e in entries] == ["75"]
+    assert seen == [("video.mp4", "output")]

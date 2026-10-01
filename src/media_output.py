@@ -141,7 +141,9 @@ def collect_outputs(history_outputs, *, resolve_path, trace, rp_job_id, s3_clien
         node = history_outputs[node_id]
         for category in ('images', 'videos', 'gifs', 'audio'):
             for item in node.get(category, []) or []:
-                if item.get('type') == 'temp':
+                # Only files the graph saved are outputs: 'temp' previews and
+                # 'input' echoes (e.g. LoadVideo previewing driving.mp4) are not.
+                if item.get('type', 'output') != 'output':
                     continue
                 filename = item.get('filename')
                 if not filename:
