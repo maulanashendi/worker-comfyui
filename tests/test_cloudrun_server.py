@@ -149,3 +149,27 @@ def test_ready_200_when_ready_and_comfy_reachable(server):
         status, data = _get(server, "/ready")
     assert status == 200
     assert data["status"] == "ready"
+
+
+def test_idle_exit_watchdog_exits_after_idle():
+    exits = []
+    cloudrun_server._LAST_ACTIVITY[0] = cloudrun_server.time.monotonic() - 10
+    cloudrun_server._idle_exit_watchdog(5, poll_sec=0.01, exit_fn=exits.append)
+    assert exits == [0]
+    cloudrun_server._RUN_LOCK.release()
+
+
+def test_idle_exit_watchdog_waits_while_job_runs():
+    exits = []
+    cloudrun_server._LAST_ACTIVITY[0] = cloudrun_server.time.monotonic() - 10
+    cloudrun_server._RUN_LOCK.acquire()
+    thread = threading.Thread(
+        target=cloudrun_server._idle_exit_watchdog, args=(5,), kwargs={"poll_sec": 0.01, "exit_fn": exits.append}
+    )
+    thread.start()
+    thread.join(0.2)
+    assert exits == []
+    cloudrun_server._RUN_LOCK.release()
+    thread.join(2)
+    assert exits == [0]
+    cloudrun_server._RUN_LOCK.release()

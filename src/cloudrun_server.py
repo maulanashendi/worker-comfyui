@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,6 +30,8 @@ logger = logging.getLogger(__name__)
 # enforcement: a stray second request (retry, probe overlap, operator error)
 # must get 429 instead of racing the single ComfyUI instance.
 _RUN_LOCK = threading.Lock()
+# Monotonic time of the last finished /run (or of boot); read by the idle-exit watchdog.
+_LAST_ACTIVITY = [time.monotonic()]
 
 
 def _send_json(handler, status_code, payload):
@@ -38,6 +41,24 @@ def _send_json(handler, status_code, payload):
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def _idle_exit_watchdog(idle_exit_sec, poll_sec=5.0, exit_fn=os._exit):
+    # A Cloud Run service keeps an idle GPU instance (billed) for up to ~10 min and
+    # that is not configurable. Exiting the process once no job has run for
+    # SERVICE_IDLE_EXIT_SEC ends the instance on our schedule instead. The run lock
+    # is taken and never released, so a /run racing the exit gets 429, not a
+    # half-started job.
+    while True:
+        time.sleep(poll_sec)
+        if not _RUN_LOCK.acquire(blocking=False):
+            continue
+        idle = time.monotonic() - _LAST_ACTIVITY[0]
+        if idle >= idle_exit_sec:
+            logger.info("cloudrun idle exit after %ds", int(idle))
+            exit_fn(0)
+            return
+        _RUN_LOCK.release()
 
 
 def _schedule_refresh_exit():
@@ -122,6 +143,7 @@ class SenaiCloudRunHandler(BaseHTTPRequestHandler):
             if refresh:
                 _schedule_refresh_exit()
         finally:
+            _LAST_ACTIVITY[0] = time.monotonic()
             _RUN_LOCK.release()
 
 
@@ -142,6 +164,10 @@ def boot_from_env():
 def main():
     port = int(os.environ.get("PORT", "8080"))
     handler_module._BOOT_STATE = boot_from_env()
+    _LAST_ACTIVITY[0] = time.monotonic()
+    idle_exit_sec = float(os.environ.get("SERVICE_IDLE_EXIT_SEC", "0"))
+    if idle_exit_sec > 0:
+        threading.Thread(target=_idle_exit_watchdog, args=(idle_exit_sec,), daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", port), SenaiCloudRunHandler)
     logger.info("senai-worker cloudrun transport listening on 0.0.0.0:%d", port)
     server.serve_forever()
