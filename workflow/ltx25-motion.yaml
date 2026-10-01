@@ -1,0 +1,88 @@
+# LTX 2.5 motion transfer ("Match & Move"): driving video -> DWPose pose frames ->
+# IC-LoRA Union Control guide, start image = target person as the first frame. int8 only.
+# Graph derived from Lightricks/ComfyUI-LTXVideo@5722b53 example_workflows/2.5/
+# LTX-2.5_ICLoRA_Union_Control_Distilled.json (pose branch), with our int8 transformer
+# and int8 Gemma 12B in place of the bf16 files, no API text encoder, no prompt enhancer
+# and no upscale stage. Never swap in the bf16 transformer here.
+version: 2
+set: ltx25-motion
+requires_comfyui: '>=0.38.0'
+custom_nodes:
+- name: ComfyUI-LTXVideo
+  repo: https://github.com/Lightricks/ComfyUI-LTXVideo.git
+  revision: 5722b53a08daec57f5442347b235cb84df0afbe7
+# HEAD of master on 2026-10-01 (2026-09-28). Has DWPreprocessor with the torchscript
+# bbox/pose path and the 2026-08-27 RGB->BGR DWPose detection fix (8ed6e34).
+# `pip` replaces the pack's requirements.txt (onnxruntime-gpu, mediapipe,
+# opencv-contrib-python, trimesh, ...): only what the DWPose torchscript path imports.
+- name: comfyui_controlnet_aux
+  repo: https://github.com/Fannovel16/comfyui_controlnet_aux.git
+  revision: 0cd290477128d42cdc3e76a826a402d866e8c684
+  pip:
+  - opencv-python-headless>=4.7.0.72,<5
+  - matplotlib
+  - scikit-image
+workflows:
+- ltx25-motion-v1.json
+allowed_class_types_extra: []
+limits:
+  no_progress_sec: 120
+  no_progress_load_sec: 600
+  execution_ceiling_sec: 1800
+warmup_graph: null
+models:
+- path: diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+  sha256: c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334
+  bytes: 21504034224
+- path: vae/ltx-2.5-video-vae-bf16.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: vae/ltx-2.5-video-vae-bf16.safetensors
+  sha256: 847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3
+  bytes: 1472223346
+- path: vae/ltx-2.5-audio-vae-bf16.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: vae/ltx-2.5-audio-vae-bf16.safetensors
+  sha256: c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5
+  bytes: 364866540
+- path: text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+  sha256: 6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f
+  bytes: 15372969374
+# Union Control (canny + depth + pose), reference downscale factor 2. Only a 2.3 build
+# exists; it is the LoRA the upstream 2.5 example loads. Repo root -> `loras`.
+- path: loras/ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors
+  hf:
+    repo: Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control
+    revision: b4d1c4d8c9e544e9bbbd6811bb4363708b6093ff
+    file: ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors
+  sha256: a1b888a87f661d27f08b394ae559e8e1050be33900bcc36a5cdf659e48f88d18
+  bytes: 654465352
+# DWPose annotators (torchscript, no onnxruntime). `annotators/` is not a ComfyUI
+# folder: workflow_models --verify links each one to
+# $AUX_ANNOTATOR_CKPTS_PATH/<hf.repo>/<hf.file>, the path comfyui_controlnet_aux's
+# custom_hf_download checks before it would download.
+- path: annotators/dw-ll_ucoco_384_bs5.torchscript.pt
+  hf:
+    repo: hr16/DWPose-TorchScript-BatchSize5
+    revision: 359d662a9b33b73f6d0f21732baf8845f17bb4be
+    file: dw-ll_ucoco_384_bs5.torchscript.pt
+  sha256: d86a0b2b59fddc0901a7076e9f59c9f8602602133ed72511c693fd11eea23d91
+  bytes: 135059124
+- path: annotators/yolox_l.torchscript.pt
+  hf:
+    repo: hr16/yolox-onnx
+    revision: a124b32c3b7c5cebda1c7cd96178f0f9d2050125
+    file: yolox_l.torchscript.pt
+  sha256: 80bc14b13c260c24b3014cd42c02994bf52296ab8fa2d80a60b6afe08c93ef42
+  bytes: 217697649

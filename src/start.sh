@@ -15,6 +15,10 @@ export REFRESH_WORKER="${REFRESH_WORKER:-dirty}"
 export SENAI_WORKER_STATE="${SENAI_WORKER_STATE:-/tmp/senai-worker-state.json}"
 export SENAI_BOOT_TIMELINE="${SENAI_BOOT_TIMELINE:-/tmp/senai-boot-timeline}"
 export SENAI_TRANSPORT="${SENAI_TRANSPORT:-runpod}"
+# Where workflow_models --verify links manifest `annotators/` models
+# (<hf repo>/<file>) and where comfyui_controlnet_aux reads them, so the pack
+# never downloads at runtime. Exported for the ComfyUI child; no operator setting.
+export AUX_ANNOTATOR_CKPTS_PATH="${AUX_ANNOTATOR_CKPTS_PATH:-/tmp/aux-annotator-ckpts}"
 # Internal-only knob (not part of the senai-worker/1 contract env list): lets
 # tests shrink the handler grace period below without touching real deploys.
 SENAI_HANDLER_GRACE_SEC="${SENAI_HANDLER_GRACE_SEC:-30}"

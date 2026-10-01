@@ -444,6 +444,36 @@ def write_model_paths(plan, model_root, hf_cache_root, path):
     path.write_text(yaml.safe_dump(config))
 
 
+ANNOTATOR_CATEGORY = 'annotators'
+
+
+def link_annotators(plan, hf_cache_root, model_root, aux_root):
+    """comfyui_controlnet_aux looks for a checkpoint at
+    $AUX_ANNOTATOR_CKPTS_PATH/<hf repo>/<file> and downloads it from Hugging Face when it
+    is missing. Link every `annotators/` model of `plan` there (to the staged/cached file
+    find_model_file resolves) so the pack never downloads. Returns the `path`s that could
+    not be linked; files absent from the cache are left to the missing-model check."""
+    failed = []
+    for item in plan.values():
+        if Path(item['path']).parts[0] != ANNOTATOR_CATEGORY:
+            continue
+        hf = item.get('hf')
+        source = find_model_file(item, hf_cache_root, model_root)
+        if not hf or not source.is_file():
+            if not hf:
+                failed.append(item['path'])
+            continue
+        try:
+            link = contained(aux_root, hf['repo']) / hf['file']
+            link.parent.mkdir(parents=True, exist_ok=True)
+            if link.is_symlink() or link.exists():
+                link.unlink()
+            link.symlink_to(source.resolve())
+        except (OSError, ValueError):
+            failed.append(item['path'])
+    return failed
+
+
 def run_verify():
     selection = os.getenv('WORKFLOWS') or os.getenv('WORKFLOW_MANIFESTS', '')
     root = Path(os.getenv('WORKFLOW_DIR', '/workflow'))
@@ -452,6 +482,7 @@ def run_verify():
     state_path = Path(os.getenv('SENAI_WORKER_STATE', '/tmp/senai-worker-state.json'))
     paths_path = Path(os.getenv('WORKFLOW_MODEL_PATHS', '/tmp/workflow_model_paths.yaml'))
     aws_bucket = os.getenv('AWS_BUCKET_NAME', '')
+    aux_root = Path(os.getenv('AUX_ANNOTATOR_CKPTS_PATH', '/tmp/aux-annotator-ckpts'))
 
     state = {
         'protocol': PROTOCOL,
@@ -492,6 +523,7 @@ def run_verify():
             missing.append(item['path'])
             continue
         bytes_visible += size
+    missing.extend(p for p in link_annotators(manifests.plan, hf_cache_root, model_root, aux_root) if p not in missing)
 
     if missing:
         ready, code, message = False, 'MODEL_CACHE_MISSING', 'Missing or mismatched models: ' + ', '.join(sorted(missing))

@@ -44,3 +44,11 @@ text encoder plus the root-level LoRA from
 `Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients`. An `hf.file` may sit in a
 different folder than `path`'s category (here the repo root vs `loras/`) as
 long as both end in the same model name; see `docs/cloudrun.md`.
+
+`WORKFLOWS=ltx25-motion.yaml` selects LTX 2.5 motion transfer
+(`ltx25-motion-v1.json`): driving video + start image + prompt. DWPose pose frames
+guide the Union Control IC-LoRA on the int8 transformer. It needs the
+`comfyui_controlnet_aux` custom node in the image
+(`CUSTOM_NODE_MANIFESTS=ltx25.yaml,ltx25-motion.yaml`). That node's
+`pip:` list replaces its requirements.txt. The `annotators/` models are linked
+for controlnet_aux at boot; see `docs/cloudrun.md`.

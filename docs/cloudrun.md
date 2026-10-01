@@ -250,3 +250,97 @@ Reference-sheet guidance (from the model card):
 - Two-part prompt: `Reference sheet: <each panel by position>` then
   `Generated video: <action, shot, dialogue>`. Default negative:
   `worst quality, inconsistent motion, blurry, jittery, distorted`.
+
+## LTX 2.5 motion transfer set (`ltx25-motion.yaml`)
+
+A driving video supplies the motion, a start image supplies the person: the
+output is the start-image person doing the driving video's motion ("Match &
+Move"). Graph `workflow/ltx25-motion-v1.json`, from the pose branch of the
+upstream `LTX-2.5_ICLoRA_Union_Control_Distilled.json`:
+
+`LoadVideo driving.mp4` → `Video Slice` (decode only `length/fps` seconds) →
+`GetVideoComponents` → `ImageFromBatch` (at most `length` frames) →
+`ResizeImageMaskNode` (width×height, center crop) → `DWPreprocessor`
+(body + hands + face, torchscript `yolox_l` + `dw-ll_ucoco_384_bs5`) →
+`LTXAddVideoICLoRAGuide`, with `LTXICLoRALoaderModelOnly` loading
+`Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control@b4d1c4d8…`
+(`ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors`, downscale factor 2;
+there is no 2.5 build) onto the **int8** transformer, and `start.png` as the
+first frame through `LTXVImgToVideoInplace` (strength 1). One distilled stage,
+8 steps, cfg 1, generated audio, `SaveVideo`. No bf16 transformer, no
+`GemmaAPITextEncode`, no enhancer, no upscaler, no onnxruntime.
+
+Select it with `WORKFLOWS=ltx25-motion.yaml` (or add it to a list, e.g.
+`WORKFLOWS=ltx25.yaml,ltx25-motion.yaml`). Alone it stages 7 files,
+39,721,315,609 bytes: int8 transformer, int8 Gemma 12B, video VAE, audio VAE,
+the Union Control LoRA, `hr16/DWPose-TorchScript-BatchSize5@359d662a…/dw-ll_ucoco_384_bs5.torchscript.pt`
+and `hr16/yolox-onnx@a124b32c…/yolox_l.torchscript.pt`, all at their repo roots
+in the bucket's `hub/models--<org>--<name>/snapshots/<rev>/` layout.
+
+### Image requirement
+
+The set needs the `comfyui_controlnet_aux` custom node
+(`Fannovel16/comfyui_controlnet_aux@0cd29047…`) in the image. `Dockerfile.ltx25`
+still defaults to `CUSTOM_NODE_MANIFESTS="ltx25.yaml"`, so build with
+`--build-arg CUSTOM_NODE_MANIFESTS=ltx25.yaml,ltx25-motion.yaml`. The manifest's
+`pip:` list replaces the pack's `requirements.txt`, so the build installs only
+`opencv-python-headless>=4.7.0.72,<5`, `matplotlib` and `scikit-image` (plus
+their dependencies), not `onnxruntime-gpu`, `mediapipe`, `opencv-contrib-python`
+or `trimesh`. ComfyUI loads the pack only when a selected set lists it
+(`--whitelist-custom-nodes`).
+
+### Annotator checkpoints (no runtime download)
+
+`comfyui_controlnet_aux` looks for `$AUX_ANNOTATOR_CKPTS_PATH/<hf repo>/<file>`
+and downloads from Hugging Face when the file is missing. The manifest files
+the two annotators under `path: annotators/<file>`; `workflow_models.py --verify`
+symlinks each one to `$AUX_ANNOTATOR_CKPTS_PATH/<hf.repo>/<hf.file>`, pointing at
+the staged copy (or the mount when staging fails). `start.sh` exports
+`AUX_ANNOTATOR_CKPTS_PATH=/tmp/aux-annotator-ckpts` by default, and the pack reads
+that variable before its own `config.yaml`. An annotator missing from the cache
+makes the worker unready with `MODEL_CACHE_MISSING`, the same as any other model.
+The graph must keep the torchscript `bbox_detector`/`pose_estimator` values.
+Other values (`.onnx`) are not staged, and the pack would try to download them.
+
+### Inputs senai sends
+
+| Input | Node | Notes |
+| --- | --- | --- |
+| `driving.mp4`, `media_type: video/mp4` (or `video/quicktime`), via `url` | `396` LoadVideo | Only `url` works: `data` inputs are image-only. Written to `/comfyui/input/senai/<job>/driving.mp4`; the graph's `driving.mp4` is rewritten to that path. |
+| `start.png` (image/png, jpeg or webp), `url` or `data` | `395` LoadImage | Target person. It becomes the first frame, so the person's pose should roughly match the driving video's first frame. |
+| prompt | `398:376` | Describe the person and the action. Negative is fixed: `worst quality, inconsistent motion, blurry, jittery, distorted`. |
+| width, height | `398:372`, `398:360` | Default 448×768 (portrait). Use multiples of 64: the guide is encoded at half size. The driving frames and the start image are center-cropped to this aspect. |
+| duration (s), fps | `398:362`, `398:361` | Default 5 s at 24 fps. `length = 1 + floor(duration*fps/8)*8` (121 by default). |
+
+Input hosts: R2 URLs need
+`INPUT_ALLOWED_HOSTS=0c65aed74e6e0d8447b486e52bbdcb91.r2.cloudflarestorage.com`
+on the service (comma-separate any other hosts). There is no default allowlist:
+an empty value rejects every `url` input with `INPUT_HOST_REJECTED`.
+`INPUT_MAX_BYTES` (default 209,715,200) caps the driving video download.
+
+### What senai must clamp or prepare
+
+- **Duration ≤ driving video length.** The graph caps the guide at `length`
+  frames, so a longer driving video is fine (only its first `length/fps`
+  seconds are decoded). A shorter one gives a guide that covers only the start
+  of the clip, and the rest of the clip has no motion guidance. senai should set
+  `duration ≤ floor(driving_seconds)`.
+- **Driving fps = output fps.** Driving frames map 1:1 to output frames. No
+  core node resamples fps, so a 30 fps driving video at fps 24 plays the motion
+  at 0.8× speed, and the `Video Slice` window decodes fewer driving seconds than
+  needed. Transcode the driving video to the output fps first (e.g. `ffmpeg -r 24`),
+  or set `398:361` to the driving video's fps.
+- **Size.** A short 720p/1080p clip is enough. The frames are resized to
+  width×height right after decoding, but decoding happens at source resolution.
+
+### Known limits
+
+- The LoRA is the LTX-2.3 Union Control, run on the 2.5 transformer, the same
+  pairing as the upstream 2.5 example. It has not been run on our int8
+  weights on a GPU yet.
+- One person works best: DWPose draws every detected person, and the guide
+  does not say which pose belongs to which person.
+- DWPose runs one frame at a time on the GPU before sampling. Expect a few
+  seconds per 121 frames on top of the sampling time (not measured yet).
+- A warm worker that switches between this set and Ingredients re-patches the
+  LoRA on each switch.
