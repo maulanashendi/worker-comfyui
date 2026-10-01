@@ -14,6 +14,7 @@ export COMFY_PID_FILE="${COMFY_PID_FILE:-/tmp/comfyui.pid}"
 export REFRESH_WORKER="${REFRESH_WORKER:-dirty}"
 export SENAI_WORKER_STATE="${SENAI_WORKER_STATE:-/tmp/senai-worker-state.json}"
 export SENAI_BOOT_TIMELINE="${SENAI_BOOT_TIMELINE:-/tmp/senai-boot-timeline}"
+export SENAI_TRANSPORT="${SENAI_TRANSPORT:-runpod}"
 # Internal-only knob (not part of the senai-worker/1 contract env list): lets
 # tests shrink the handler grace period below without touching real deploys.
 SENAI_HANDLER_GRACE_SEC="${SENAI_HANDLER_GRACE_SEC:-30}"
@@ -168,8 +169,13 @@ python -u "$COMFY_ROOT/main.py" "${comfy_args[@]}" &
 comfy_pid=$!
 echo "$comfy_pid" > "$COMFY_PID_FILE"
 record_stage comfy_start
-echo "worker-comfyui: Starting RunPod Handler"
-python -u "$WORKER_ROOT/handler.py" "${handler_args[@]}" "$@" &
+if [ "$SENAI_TRANSPORT" = "cloudrun" ]; then
+    echo "worker-comfyui: Starting Cloud Run HTTP transport"
+    python -u "$WORKER_ROOT/cloudrun_server.py" &
+else
+    echo "worker-comfyui: Starting RunPod Handler"
+    python -u "$WORKER_ROOT/handler.py" "${handler_args[@]}" "$@" &
+fi
 handler_pid=$!
 
 # Exit when either service exits; the EXIT trap stops the other child.

@@ -121,9 +121,14 @@ RUN uv pip install -r /requirements.txt
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py src/workflow_models.py src/media_output.py \
     src/senai_worker.py src/senai_errors.py src/comfy_client.py src/guard.py \
+    src/cloudrun_server.py \
     handler.py test_input.json ./
 COPY workflow/ /workflow/
 RUN chmod +x /start.sh
+
+# Cloud Run HTTP transport (SENAI_TRANSPORT=cloudrun) listens on $PORT,
+# default 8080; unused and harmless for the default RunPod transport.
+EXPOSE 8080
 
 # Add script to install custom nodes
 COPY scripts/comfy-node-install.sh /usr/local/bin/comfy-node-install
