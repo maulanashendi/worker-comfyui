@@ -120,17 +120,33 @@ record_stage gpu_check
 # GCSFuse mount serves at ~2 MB/s. Stage the HF cache into the in-memory
 # filesystem with parallel sequential copies first (~550 MB/s per stream over
 # Direct VPC + enable-buffered-read), then point the verifier and ComfyUI at the
-# copy. A failed copy keeps the mount as HF_CACHE_ROOT so boot still proceeds.
+# copy. Only the files the selected WORKFLOWS manifests reference are copied
+# (RAM is capped at 80 GiB, so the bucket may hold more than one set fits); if
+# that list can't be produced, the whole cache is copied as before. A failed
+# copy keeps the mount as HF_CACHE_ROOT so boot still proceeds.
 if { [ "$SENAI_TRANSPORT" = "cloudrun" ] || [ "$SENAI_TRANSPORT" = "cloudrun-job" ]; } && [ -d "${HF_CACHE_ROOT:-}" ]; then
-    stage_dir=/tmp/hf-stage/hub
-    echo "worker-comfyui: staging $HF_CACHE_ROOT into $stage_dir"
-    if (cd "$HF_CACHE_ROOT" && find . -type f -print0 \
-        | xargs -0 -P 8 -I{} sh -c 'mkdir -p "$(dirname "$1/$2")" && cp "$2" "$1/$2"' _ "$stage_dir" {}); then
+    # Internal-only knob (not part of the senai-worker/1 contract env list): lets
+    # tests stage somewhere other than /tmp.
+    stage_dir="${SENAI_HF_STAGE_DIR:-/tmp/hf-stage/hub}"
+    stage_list="$(mktemp)"
+    copy_listed() {
+        # stdin: NUL-separated paths relative to $HF_CACHE_ROOT
+        (cd "$HF_CACHE_ROOT" && xargs -0 -P 8 -I{} sh -c 'mkdir -p "$(dirname "$1/$2")" && cp "$2" "$1/$2"' _ "$stage_dir" {})
+    }
+    if python3 "$WORKER_ROOT/workflow_models.py" --stage-list > "$stage_list" && [ -s "$stage_list" ]; then
+        echo "worker-comfyui: staging $(wc -l < "$stage_list") manifest files from $HF_CACHE_ROOT into $stage_dir"
+        stage_cmd() { tr '\n' '\0' < "$stage_list" | copy_listed; }
+    else
+        echo "worker-comfyui: manifest file list unavailable; staging all of $HF_CACHE_ROOT into $stage_dir" >&2
+        stage_cmd() { (cd "$HF_CACHE_ROOT" && find . -type f -print0) | copy_listed; }
+    fi
+    if stage_cmd; then
         export HF_CACHE_ROOT="$stage_dir"
         echo "worker-comfyui: staged $(du -sb "$stage_dir" | cut -f1) bytes"
     else
         echo "worker-comfyui: model staging failed; reading from $HF_CACHE_ROOT directly" >&2
     fi
+    rm -f "$stage_list"
     record_stage model_stage
 fi
 

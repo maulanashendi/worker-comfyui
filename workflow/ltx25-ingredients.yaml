@@ -1,0 +1,58 @@
+# LTX 2.5 "Ingredients" IC-LoRA (reference sheet + prompt -> video), int8 only.
+# Graph derived from Lightricks/ComfyUI-LTXVideo@5722b53 example_workflows/2.5/
+# LTX-2.5_ICLoRA_Ingredients_Single_Stage_Distilled.json, with our int8 transformer and
+# int8 Gemma 12B in place of the bf16 files, no API text encoder, no prompt enhancer and
+# no upscale stage. Never swap in the bf16 transformer here.
+version: 2
+set: ltx25-ingredients
+requires_comfyui: '>=0.38.0'
+custom_nodes:
+- name: ComfyUI-LTXVideo
+  repo: https://github.com/Lightricks/ComfyUI-LTXVideo.git
+  revision: 5722b53a08daec57f5442347b235cb84df0afbe7
+workflows:
+- ltx25-ingredients-v1.json
+allowed_class_types_extra: []
+limits:
+  no_progress_sec: 120
+  no_progress_load_sec: 600
+  execution_ceiling_sec: 1800
+warmup_graph: null
+models:
+- path: diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+  sha256: c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334
+  bytes: 21504034224
+- path: vae/ltx-2.5-video-vae-bf16.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: vae/ltx-2.5-video-vae-bf16.safetensors
+  sha256: 847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3
+  bytes: 1472223346
+- path: vae/ltx-2.5-audio-vae-bf16.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: vae/ltx-2.5-audio-vae-bf16.safetensors
+  sha256: c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5
+  bytes: 364866540
+- path: text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+  sha256: 6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f
+  bytes: 15372969374
+# The LoRA sits at the repo root; `path` still files it under ComfyUI's `loras`
+# category (workflow_models.hf_category_dir maps the snapshot root to `loras`).
+- path: loras/ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients
+    revision: 12040e4091ac2008d3906a594e31a7fb1ab9d546
+    file: ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors
+  sha256: ff873a5beada3c579a8137c7c53343916f78bcc9a529ba910143073fe8715e95
+  bytes: 1308787472

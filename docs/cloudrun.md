@@ -197,3 +197,56 @@ entries back to the bucket. `metadata-cache-ttl-secs=0` on the queue mount
 keeps `pending/` listings fresh across concurrent executions and the
 out-of-band `gcloud storage cp` that enqueues work; the read-only models mount
 has no such requirement.
+
+## Boot staging copies only the selected sets
+
+In both `cloudrun` and `cloudrun-job` mode, `start.sh` asks
+`workflow_models.py --stage-list` for the HF-cache-relative files the
+`WORKFLOWS` manifests reference (each model's `snapshots/<rev>/<file>`, plus
+`refs/<rev>` for a branch revision) and copies only those into the in-memory
+stage. The bucket can therefore hold more sets than fit in the 80 GiB RAM cap.
+If the list can't be produced (unreadable manifest, no listed file found), it
+falls back to copying all of `$HF_CACHE_ROOT`, the earlier behaviour.
+
+## LTX 2.5 Ingredients set (`ltx25-ingredients.yaml`)
+
+A reference sheet plus a prompt produces a video that keeps the sheet's
+character, product and location. It uses the IC-LoRA
+`Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients@12040e40…`
+(`ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors`, 1,308,787,472 bytes, at the
+repo root) on top of the **int8** transformer and int8 Gemma 12B encoder. The
+bf16 transformer is never used. Graph: `workflow/ltx25-ingredients-v1.json`
+(single stage, 8 distilled steps, cfg 1, no prompt enhancer, no upscaler, no
+`GemmaAPITextEncode`).
+
+Select it with:
+
+- `WORKFLOWS=ltx25-ingredients.yaml`: stages 5 files, 40,022,880,956 bytes
+  (int8 transformer, int8 Gemma 12B, video VAE, audio VAE, LoRA).
+- `WORKFLOWS=ltx25.yaml,ltx25-ingredients.yaml`: both sets on one worker
+  (7 files). A warm worker that alternates between i2v and Ingredients re-patches
+  the LoRA on each switch, so a separate service for Ingredients is cheaper.
+
+The LoRA must be in the bucket at the real HF layout:
+`hub/models--Lightricks--LTX-2.5-22b-IC-LoRA-Ingredients/snapshots/12040e4091ac2008d3906a594e31a7fb1ab9d546/ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors`.
+The manifest files it as `path: loras/…`, and `write_model_paths` registers that
+snapshot root as a `loras` search folder, so `LTXICLoRALoaderModelOnly` finds it.
+
+Graph inputs senai sets: `395` LoadImage `reference.png` (the sheet),
+`398:376` prompt, `398:372`/`398:360` width/height (default 768×448),
+`398:362` duration in seconds (default 5) and `398:361` fps (default 24);
+length is `1 + floor(duration*fps/8)*8` (121 frames by default). The sheet is
+resized to width×height (stretched, not cropped), so send a width/height with the
+sheet's aspect ratio.
+
+Reference-sheet guidance (from the model card):
+
+- One composite image with one clean panel per element (each character as a
+  face close-up plus a body turnaround, each prop as a product-style render, one
+  clean location panel) on a black background, with no text. Bigger panels carry
+  over better; elements that are not on the sheet will not appear.
+- Trained at **768×448, 121 frames, 24 fps**. Other sizes and longer clips are
+  out of distribution; keep ≥121 frames. Portrait 448×768 is untested.
+- Two-part prompt: `Reference sheet: <each panel by position>` then
+  `Generated video: <action, shot, dialogue>`. Default negative:
+  `worst quality, inconsistent motion, blurry, jittery, distorted`.

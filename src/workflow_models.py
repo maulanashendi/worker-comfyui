@@ -65,11 +65,27 @@ def graph_class_types(graph):
     return {node['class_type'] for node in graph.values() if isinstance(node, dict) and 'class_type' in node}
 
 
+def hf_category_dir(path, hf_file):
+    """Snapshot-relative folder that plays the role of `path`'s ComfyUI category.
+
+    `path` is `<category>/<name...>`; `hf.file` is where the file sits in the HF repo.
+    They must agree on `<name...>`; whatever precedes it in `hf.file` is the folder to
+    register for that category ('.' when the file is at the repo root, e.g. a LoRA repo
+    whose `x.safetensors` must still be found under `loras`)."""
+    if not isinstance(hf_file, str) or not hf_file or Path(hf_file).is_absolute() or '..' in Path(hf_file).parts:
+        raise ValueError(f'hf.file must be a relative path inside the repo: {path}')
+    name = Path(path).parts[1:]
+    file_parts = Path(hf_file).parts
+    if not name or tuple(file_parts[len(file_parts) - len(name):]) != tuple(name):
+        raise ValueError(f'hf.file must end with the model name of path: {path}')
+    prefix = file_parts[:len(file_parts) - len(name)]
+    return '/'.join(prefix) if prefix else '.'
+
+
 def resolve_hf_model(model):
     """v2 manifest entry with an `hf` source: derive the download URL, keep the hf pin."""
     hf = model['hf']
-    if hf.get('file') != model['path']:
-        raise ValueError(f"hf.file must equal path: {model['path']}")
+    hf_category_dir(model['path'], hf.get('file'))
     revision = hf.get('revision') or 'main'
     url = model.get('url') or f"https://huggingface.co/{hf['repo']}/resolve/{revision}/{hf['file']}"
     item = {'path': model['path'], 'url': url, 'sha256': model.get('sha256') or None, 'hf': hf}
@@ -335,6 +351,42 @@ def find_model_file(item, hf_cache_root, model_root):
     return candidates[0]
 
 
+def stage_files(plan, hf_cache_root):
+    """HF-cache-relative paths a staging copy needs for `plan`: each hf model's snapshot
+    file plus the `refs/<rev>` file when the revision is a branch/tag. Files absent from
+    the cache are left out (verify reports them), so staging copies what exists."""
+    files = set()
+    for item in plan.values():
+        hf = item.get('hf')
+        if not hf:
+            continue
+        org, name = hf['repo'].split('/', 1)
+        repo_dir = Path(f'models--{org}--{name}')
+        rev = hf.get('revision') or 'main'
+        if not re.fullmatch(r'[0-9a-fA-F]{40}', rev) and (hf_cache_root / repo_dir / 'refs' / rev).is_file():
+            files.add(str(repo_dir / 'refs' / rev))
+        snapshot = resolve_snapshot_dir(hf_cache_root, hf['repo'], hf.get('revision'))
+        candidate = snapshot / hf['file']
+        if candidate.is_file():
+            files.add(str(candidate.relative_to(hf_cache_root)))
+    return sorted(files)
+
+
+def run_stage_list():
+    """Print stage_files() for WORKFLOWS, one per line; exit 1 when nothing can be listed
+    so start.sh falls back to copying the whole cache."""
+    selection = os.getenv('WORKFLOWS') or os.getenv('WORKFLOW_MANIFESTS', '')
+    if not selection:
+        raise SystemExit('No workflows selected')
+    root = Path(os.getenv('WORKFLOW_DIR', '/workflow'))
+    model_root = Path(os.getenv('COMFY_MODEL_ROOT', '/comfyui/models'))
+    hf_cache_root = Path(os.getenv('HF_CACHE_ROOT', '/runpod-volume/huggingface-cache/hub'))
+    files = stage_files(load_manifests(selection, root, model_root).plan, hf_cache_root)
+    if not files:
+        raise SystemExit('No manifest model found in ' + str(hf_cache_root))
+    print('\n'.join(files))
+
+
 def comfyui_version():
     version_file = Path('/comfyui/comfyui_version.py')
     if version_file.is_file():
@@ -379,8 +431,13 @@ def write_model_paths(plan, model_root, hf_cache_root, path):
         base = resolve_snapshot_dir(hf_cache_root, hf['repo'], hf.get('revision'))
         key = 'hf_' + re.sub(r'[^a-z0-9]+', '_', hf['repo'].lower()).strip('_')
         category = Path(item['path']).parts[0]
+        folder = hf_category_dir(item['path'], hf['file']) + '/'
         section = config.setdefault(key, {'base_path': str(base)})
-        section[category] = category + '/'
+        # extra_model_paths takes several folders per category as newline-separated lines.
+        folders = section.get(category, '').split('\n') if section.get(category) else []
+        if folder not in folders:
+            folders.append(folder)
+        section[category] = '\n'.join(folders)
     categories = sorted({Path(item['path']).parts[0] for item in plan.values()})
     config['workflow_models'] = {'base_path': str(model_root.resolve()), **{c: c + '/' for c in categories}}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -478,7 +535,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true', help='Validate and print checklist; no downloads or worker startup')
     parser.add_argument('--verify', action='store_true', help='Verify cached models against the manifest and write boot state; never downloads')
+    parser.add_argument('--stage-list', action='store_true', help='Print the HF-cache-relative files the selected WORKFLOWS need (for boot staging)')
     args = parser.parse_args()
+    if args.stage_list:
+        run_stage_list()
+        return
     if args.verify:
         run_verify()
         return

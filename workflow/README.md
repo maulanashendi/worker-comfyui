@@ -37,3 +37,10 @@ is not read by `workflow_models.py` (editor JSON needs an exported API graph
 before it can be sent through the protocol). No custom node repository is
 required for this set. See the generic cache preparation instructions in the
 deployment guide.
+
+`WORKFLOWS=ltx25-ingredients.yaml` selects the LTX 2.5 Ingredients IC-LoRA set
+(`ltx25-ingredients-v1.json`): reference sheet + prompt, int8 transformer and
+text encoder plus the root-level LoRA from
+`Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients`. An `hf.file` may sit in a
+different folder than `path`'s category (here the repo root vs `loras/`) as
+long as both end in the same model name; see `docs/cloudrun.md`.
