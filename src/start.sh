@@ -180,8 +180,10 @@ if [ -n "$whitelist_nodes" ]; then
 fi
 if [ "$SENAI_TRANSPORT" = "cloudrun" ]; then
     # Weights are staged in memory (above), so mmap is cheap and avoids a second
-    # in-RAM copy; 96 GB of VRAM holds the whole LTX set between jobs.
-    comfy_args+=(--highvram)
+    # in-RAM copy; 96 GB of VRAM holds the whole LTX set between jobs. Cloud Run
+    # pins 20 vCPU to exactly 80 GiB, so skip the ~64 GB pinned offload buffer
+    # that --highvram never uses.
+    comfy_args+=(--highvram --disable-pinned-memory)
 fi
 handler_args=()
 if [ "${SERVE_API_LOCALLY:-false}" = "true" ]; then
