@@ -1,0 +1,31 @@
+# LTX 2.5 NVFP4 distilled transformer as an ADD-ON set (int8 stays the default everywhere).
+# int8-vs-nvfp4 A/B. Select it next to ltx25.yaml: WORKFLOWS=ltx25.yaml,ltx25-nvfp4.yaml
+# The A/B envelopes reuse ltx25-t2v-v1 / ltx25-i2v-v1 (allowlist comes from ltx25.yaml) and only
+# change UNETLoader 398:384 unet_name; weight_dtype stays `default` (quant format comes from the file's
+# _quantization_metadata header, comfy/utils.py convert_old_quants). int8 stays the default everywhere.
+# No graphs are listed on purpose: the shipped graphs reference the int8 file, so listing them here
+# without the int8 entry fails "Workflow model missing from manifest" (workflow_models.apply_models).
+# NVFP4 matmuls need Blackwell (cc >= 10.0) + torch cu130 (comfy-kitchen cuda backend / cuBLASLt 13).
+# Same HF revision as every other LTX-2.5 file we pin (5e6e7101…), so it uploads next to them.
+version: 2
+set: ltx25-nvfp4
+requires_comfyui: '>=0.38.0'
+custom_nodes:
+- name: ComfyUI-LTXVideo
+  repo: https://github.com/Lightricks/ComfyUI-LTXVideo.git
+  revision: 5722b53a08daec57f5442347b235cb84df0afbe7
+workflows: []
+allowed_class_types_extra: []
+limits:
+  no_progress_sec: 120
+  no_progress_load_sec: 600
+  execution_ceiling_sec: 1800
+warmup_graph: null
+models:
+- path: diffusion_models/ltx-2.5-22b-distilled-transformer-nvfp4.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: diffusion_models/ltx-2.5-22b-distilled-transformer-nvfp4.safetensors
+  sha256: 4b94231e734c1950f8f6826cb8bd8715d94be5b3e04f8256ee060c5bc3886c30
+  bytes: 18721548408
