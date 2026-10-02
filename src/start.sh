@@ -214,6 +214,21 @@ python -u "$COMFY_ROOT/main.py" "${comfy_args[@]}" &
 comfy_pid=$!
 echo "$comfy_pid" > "$COMFY_PID_FILE"
 record_stage comfy_start
+# R&D only: one memory line every MEM_SAMPLE_SEC (off when 0/unset). Staged
+# weights live in tmpfs (Shmem), so avail = what jobs can still grow into.
+if [ "${MEM_SAMPLE_SEC:-0}" != "0" ]; then
+    (
+        cg=/sys/fs/cgroup/memory.current
+        [ -r "$cg" ] || cg=/sys/fs/cgroup/memory/memory.usage_in_bytes
+        while kill -0 "$comfy_pid" 2>/dev/null; do
+            awk -v rss="$(awk '/^VmRSS/{print int($2/1024)}' /proc/$comfy_pid/status 2>/dev/null)" \
+                -v cgm="$( [ -r "$cg" ] && echo $(( $(cat "$cg") >> 20 )) )" \
+                '/^MemTotal/{t=$2} /^MemAvailable/{a=$2} /^Shmem:/{s=$2}
+                 END{printf "memsample total_mb=%d avail_mb=%d shmem_mb=%d comfy_rss_mb=%s cgroup_mb=%s\n", t/1024, a/1024, s/1024, rss, cgm}' /proc/meminfo
+            sleep "$MEM_SAMPLE_SEC"
+        done
+    ) &
+fi
 if [ "$SENAI_TRANSPORT" = "cloudrun" ]; then
     echo "worker-comfyui: Starting Cloud Run HTTP transport"
     python -u "$WORKER_ROOT/cloudrun_server.py" &
