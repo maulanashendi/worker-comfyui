@@ -73,3 +73,25 @@ def test_ltx25_matches_pinned_comfyui_version():
         line for line in ltx25.splitlines() if line.startswith("ARG COMFYUI_VERSION=")
     )
     assert generic_version == ltx25_version == "ARG COMFYUI_VERSION=0.38.0"
+
+
+TORCH_ARG_DEFAULTS = {
+    "TORCH_INDEX_URL": "https://download.pytorch.org/whl/cu128",
+    "TORCH_VERSION": "2.11.0",
+    "TORCHVISION_VERSION": "0.26.0",
+    "TORCHAUDIO_VERSION": "2.11.0",
+}
+
+
+def test_torch_build_args_default_to_cu128_in_both_dockerfiles():
+    # cu128 must stay the default: RunPod hosts run driver 570/575, where a
+    # cu130 torch fails CUDA init. cu130 is opt-in via --build-arg only.
+    for name in ("Dockerfile", "Dockerfile.ltx25"):
+        lines = read(name).splitlines()
+        for arg, default in TORCH_ARG_DEFAULTS.items():
+            assert lines.count(f"ARG {arg}={default}") == 1, (name, arg)
+        text = read(name)
+        assert "--index-url ${TORCH_INDEX_URL}" in text
+        assert "torch==${TORCH_VERSION}" in text
+        assert "torchvision==${TORCHVISION_VERSION}" in text
+        assert "torchaudio==${TORCHAUDIO_VERSION}" in text

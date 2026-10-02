@@ -86,8 +86,19 @@ RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
 # a cu13 torch fails CUDA init at startup. cu128 builds run on driver >= 570,
 # i.e. every allowed host. Installing torch first satisfies the bare `torch`
 # requirement so the PyPI pass doesn't touch it.
-RUN uv pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
-      --index-url https://download.pytorch.org/whl/cu128 \
+#
+# Opt-in cu130: hosts with driver >= 580 (e.g. Cloud Run GPU) can build with
+# --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130 so
+# ComfyUI enables comfy-kitchen's CUDA kernels (it disables them on torch < cu130).
+# Never ship a cu130 image to RunPod. The same version pins exist on both indexes.
+# (Distinct from PYTORCH_INDEX_URL above, which only feeds the legacy
+# ENABLE_PYTORCH_UPGRADE step.)
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
+ARG TORCH_VERSION=2.11.0
+ARG TORCHVISION_VERSION=0.26.0
+ARG TORCHAUDIO_VERSION=2.11.0
+RUN uv pip install torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} \
+      torchaudio==${TORCHAUDIO_VERSION} --index-url ${TORCH_INDEX_URL} \
     && uv pip install -r /comfyui/requirements.txt \
     && for r in /comfyui/custom_nodes/*/requirements.txt; do \
          [ -f "$r" ] && uv pip install -r "$r" || true; \
