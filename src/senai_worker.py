@@ -656,6 +656,7 @@ def run_job(job: dict, *, boot_state: BootState, comfy) -> dict:
             bucket=bucket,
             prefix=os.environ.get("OUTPUT_PREFIX", "renders"),
             presign_ttl_sec=_env_int("OUTPUT_PRESIGN_TTL_SEC", 86400),
+            transcode=os.environ.get("OUTPUT_TRANSCODE"),
         )
         timings["collect_ms"] = int((time.monotonic() - collect_started) * 1000)
 

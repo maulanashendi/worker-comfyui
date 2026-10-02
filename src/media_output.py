@@ -2,9 +2,12 @@
 import hashlib
 import json
 import os
+import re
+import shutil
 import subprocess
+import tempfile
 import time
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import boto3
 
@@ -119,14 +122,56 @@ def _upload(s3_client, bucket, key, path, media_type, presign_ttl_sec):
     raise WorkerError('UPLOAD_FAILED', f'upload of {key} failed after 3 attempts: {last_exc}')
 
 
+_TRANSCODE_RE = re.compile(r'^h264-crf(\d{1,2})$')
+_TRANSCODE_TIMEOUT_SEC = 900
+
+
+def parse_output_transcode(value):
+    """OUTPUT_TRANSCODE env -> CRF (int) or None when unset/empty. Only `h264-crf<N>` (N 0..51)."""
+    if value is None or not value.strip():
+        return None
+    match = _TRANSCODE_RE.match(value.strip())
+    if not match or int(match.group(1)) > 51:
+        raise WorkerError('INTERNAL', f'OUTPUT_TRANSCODE={value!r} is not supported (expected h264-crf<0..51>)')
+    return int(match.group(1))
+
+
+def transcode_command(src, dst, crf):
+    # Frame threads, not sliced threads: x264 slices put a prediction/deblock break every
+    # slice border (64-px horizontal seams at 704..1280 px tall). Audio is copied untouched.
+    return [
+        'ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', str(src),
+        '-map', '0:v:0', '-map', '0:a?',
+        '-c:v', 'libx264', '-preset', 'slow', '-crf', str(crf), '-pix_fmt', 'yuv420p',
+        '-threads', '0', '-x264-params', 'sliced-threads=0',
+        '-c:a', 'copy', '-movflags', '+faststart',
+        str(dst),
+    ]
+
+
+def transcode_video(src, dst, crf, *, runner=subprocess.run):
+    try:
+        proc = runner(transcode_command(src, dst, crf), capture_output=True, text=True, timeout=_TRANSCODE_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired as exc:
+        raise WorkerError('INTERNAL', f'output transcode timed out for {src}: {exc}') from exc
+    except OSError as exc:
+        raise WorkerError('INTERNAL', f'output transcode could not run ffmpeg for {src}: {exc}') from exc
+    if proc.returncode != 0:
+        raise WorkerError('INTERNAL', f'output transcode failed (rc={proc.returncode}) for {src}: {proc.stderr[-300:]}')
+    return dst
+
+
 def _node_sort_key(node_id):
     return (0, int(node_id)) if node_id.isdigit() else (1, node_id)
 
 
 def collect_outputs(history_outputs, *, resolve_path, trace, rp_job_id, s3_client=None,
-                     bucket=None, prefix='renders', presign_ttl_sec=86400):
+                     bucket=None, prefix='renders', presign_ttl_sec=86400, transcode=None):
+    """`transcode` is the OUTPUT_TRANSCODE value (e.g. 'h264-crf16'); None/empty keeps files as saved."""
     if s3_client is None:
         raise WorkerError('OUTPUT_NOT_CONFIGURED', 'no S3 client configured for outputs')
+    transcode_crf = parse_output_transcode(transcode)
+    workdir = None
 
     if trace:
         generation_id = trace['generation_id']
@@ -136,6 +181,21 @@ def collect_outputs(history_outputs, *, resolve_path, trace, rp_job_id, s3_clien
         attempt = 0
 
     entries = []
+    try:
+        workdir = tempfile.mkdtemp(prefix='senai-transcode-') if transcode_crf is not None else None
+        _collect_into(entries, history_outputs, resolve_path, generation_id, attempt, s3_client, bucket,
+                      prefix, presign_ttl_sec, transcode_crf, workdir)
+    finally:
+        if workdir is not None:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    if not entries:
+        raise WorkerError('OUTPUT_EMPTY', 'workflow produced no non-temp outputs')
+    return entries
+
+
+def _collect_into(entries, history_outputs, resolve_path, generation_id, attempt, s3_client, bucket,
+                  prefix, presign_ttl_sec, transcode_crf, workdir):
     index = 0
     for node_id in sorted(history_outputs.keys(), key=_node_sort_key):
         node = history_outputs[node_id]
@@ -152,8 +212,12 @@ def collect_outputs(history_outputs, *, resolve_path, trace, rp_job_id, s3_clien
                 item_type = item.get('type', 'output')
                 path = resolve_path(filename, subfolder, item_type)
                 probe = probe_media(path)
-                sha256, size = _hash_file(path)
                 basename = PurePosixPath(filename).name
+                if transcode_crf is not None and probe['media_type'].startswith('video/'):
+                    basename = f'{PurePosixPath(basename).stem}.mp4'
+                    path = transcode_video(path, Path(workdir) / f'{index:02d}-{basename}', transcode_crf)
+                    probe = probe_media(path)
+                sha256, size = _hash_file(path)
                 key = f'{prefix}/{generation_id}/{attempt}/{index:02d}-{basename}'
                 url = _upload(s3_client, bucket, key, path, probe['media_type'], presign_ttl_sec)
                 entry = {
@@ -171,10 +235,6 @@ def collect_outputs(history_outputs, *, resolve_path, trace, rp_job_id, s3_clien
                         entry[field] = probe[field]
                 entries.append(entry)
                 index += 1
-
-    if not entries:
-        raise WorkerError('OUTPUT_EMPTY', 'workflow produced no non-temp outputs')
-    return entries
 
 
 def make_s3_client():

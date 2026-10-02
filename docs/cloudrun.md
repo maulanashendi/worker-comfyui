@@ -36,10 +36,37 @@ All RunPod-path env vars (`WORKFLOWS`, `MODEL_DOWNLOAD_POLICY`, `HF_CACHE_ROOT`,
 | `HF_CACHE_ROOT` | `/models/hub` | Points at the GCS FUSE mount instead of the RunPod network-volume default; see "Model resolution" below. |
 | `MODEL_DOWNLOAD_POLICY` | `cache-only` | Same as RunPod — the GPU service never downloads weights. |
 | `COMFY_READY_TIMEOUT_SEC` | optional | Same meaning as the RunPod path's boot wait; passed to `senai_worker.boot()`. |
+| `OUTPUT_TRANSCODE` | optional, e.g. `h264-crf16` | Re-encode every video output before upload (see "Output transcode" below). Unset/empty = upload the file exactly as `SaveVideo` wrote it (default). Works on both transports. |
 
 No other new env vars; no new dependencies (`cloudrun_server.py` uses only
 `http.server` from the standard library — see PR description for proof
 `fastapi`/`uvicorn`/`aiohttp` are not in `requirements.txt`).
+
+### Output transcode (`OUTPUT_TRANSCODE`)
+
+ComfyUI's `SaveVideo` encodes through PyAV with x264 defaults (CRF 23 unless the
+graph sets `format.codec.encoding.crf`, preset medium) and in **sliced-thread**
+mode, which leaves faint horizontal seams every 64 px (one x264 slice border per
+4 macroblock rows). With `OUTPUT_TRANSCODE=h264-crf<N>` (`N` 0–51) the worker
+runs, per video output, before hashing and upload:
+
+```
+ffmpeg -i <saved> -map 0:v:0 -map 0:a? -c:v libx264 -preset slow -crf <N> -pix_fmt yuv420p \
+       -threads 0 -x264-params sliced-threads=0 -c:a copy -movflags +faststart <tmp>.mp4
+```
+
+- Frame threads, not slices: removes the 64-px seams. Audio is stream-copied.
+- The output entry (`bytes`, `sha256`, probe fields, key) describes the
+  transcoded file; the key keeps the saved basename with a `.mp4` extension.
+  Images and audio-only outputs are not touched; the ComfyUI output file is
+  left as is and the temp file is deleted after upload.
+- Re-encoding cannot restore detail the first encode threw away, so pair it
+  with a near-lossless `SaveVideo` intermediate (`format.codec.encoding.crf`
+  around 8–10) in the graph.
+- An unsupported value or an ffmpeg failure/timeout (900 s) fails the job with
+  `INTERNAL`; there is no silent fallback to the untranscoded file.
+- `ffmpeg` is already in both images (`Dockerfile`, `Dockerfile.ltx25` apt
+  install); no new dependency.
 
 ## HTTP surface
 
