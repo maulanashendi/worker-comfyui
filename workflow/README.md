@@ -52,3 +52,12 @@ guide the Union Control IC-LoRA on the int8 transformer. It needs the
 (`CUSTOM_NODE_MANIFESTS=ltx25.yaml,ltx25-motion.yaml`). That node's
 `pip:` list replaces its requirements.txt. The `annotators/` models are linked
 for controlnet_aux at boot; see `docs/cloudrun.md`.
+
+`WORKFLOWS=ltx25-upscale.yaml` selects the LTX 2.5 1080p -> ~4K (3840x2176) video upscale
+with the Refine-Details IC-LoRA on the int8 transformer: path A
+(`ltx25-upscale-a-v1.json`, official TiledFusion V2V Upscale, 8 steps from noise) and path B
+(`ltx25-upscale-b-v1.json`, Native 4K stage 2 on our clip: VAE encode, latent x2, 3 steps).
+Input `source.mp4` (url only). Run this set alone (RAM). Requests must send
+`limits.no_progress_sec` of about 900 and the service needs `JOB_DEADLINE_CEILING_SEC` >= 3600.
+Manifest `limits` are merged last-wins across selected sets, so combining this set with
+others raises their limits too.

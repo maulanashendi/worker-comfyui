@@ -1,0 +1,67 @@
+# LTX 2.5 1080p -> ~4K (3840x2176) video upscale with the Refine-Details IC-LoRA, int8 only.
+# Path A (ltx25-upscale-a-v1.json): Lightricks/ComfyUI-LTXVideo@5722b53
+#   example_workflows/2.5/LTX-2.5_V2V_TiledFusion_Upscale.json - lanczos guide at the output
+#   canvas, LTXVTiledFusionSampler (1024x576 tiles, overlap 0.5, euler, 8 steps from noise).
+# Path B (ltx25-upscale-b-v1.json): stage 2 of LTX-2.5_V2V_TiledFusion_Native_4K_8K.json run on
+#   our clip - VAE encode, latent x2 upscaler, same guide/sampler, 3 steps from 0.909375.
+# Changes vs upstream: int8 transformer and int8 Gemma 12B in place of the bf16 files, no API
+# text encoder, no prompt enhancer, one temporal extent (no streaming windows), source audio
+# muxed as is. Never swap in the bf16 transformer here.
+# RAM: ~40 GB staged plus ~30-40 GB of 4K frame tensors; run this set ALONE
+# (WORKFLOWS=ltx25-upscale.yaml). A step takes ~3-4.5 min at 4K and the fusion sampler reports
+# progress once per step: requests must also send limits.no_progress_sec >= 900, and the
+# service needs JOB_DEADLINE_CEILING_SEC >= 3600 (the effective ceiling is the minimum).
+version: 2
+set: ltx25-upscale
+requires_comfyui: '>=0.38.0'
+custom_nodes:
+- name: ComfyUI-LTXVideo
+  repo: https://github.com/Lightricks/ComfyUI-LTXVideo.git
+  revision: 5722b53a08daec57f5442347b235cb84df0afbe7
+workflows:
+- ltx25-upscale-a-v1.json
+- ltx25-upscale-b-v1.json
+allowed_class_types_extra: []
+limits:
+  no_progress_sec: 900
+  no_progress_load_sec: 900
+  execution_ceiling_sec: 3600
+warmup_graph: null
+models:
+- path: diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+  sha256: c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334
+  bytes: 21504034224
+- path: vae/ltx-2.5-video-vae-bf16.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: vae/ltx-2.5-video-vae-bf16.safetensors
+  sha256: 847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3
+  bytes: 1472223346
+- path: text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+  sha256: 6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f
+  bytes: 15372969374
+# Path B only.
+- path: latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors
+  sha256: eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8
+  bytes: 995778752
+# The LoRA sits at the repo root; `path` files it under ComfyUI's `loras` category.
+- path: loras/ltx-2.5-22b-ic-lora-refine-details-1.0.safetensors
+  hf:
+    repo: Lightricks/LTX-2.5-22b-IC-LoRA-Refine-Details
+    revision: 4912c478b35dd96b6cdcc5f7c7ff9d72c2c57929
+    file: ltx-2.5-22b-ic-lora-refine-details-1.0.safetensors
+  sha256: 771a84f70e143af89867fc714ebbf7bd6edcaa4974c0360cba4a2d292a99f0e6
+  bytes: 1308787534
