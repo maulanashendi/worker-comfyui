@@ -35,7 +35,7 @@ _TRACE_KEYS = {
     "graph_sha256",
 }
 _LIMITS_REQUIRED = {"deadline_at"}
-_LIMITS_OPTIONAL = {"no_progress_sec", "no_progress_load_sec"}
+_LIMITS_OPTIONAL = {"no_progress_sec", "no_progress_load_sec", "max_execution_sec"}
 _INPUT_ITEM_KEYS = {"name", "media_type", "url", "data", "bytes", "sha256"}
 _NODE_ID_RE = re.compile(r"^[0-9A-Za-z:_-]+$")
 
@@ -59,6 +59,7 @@ class Envelope:
     deadline_at: datetime | None
     no_progress_sec: int | None
     no_progress_load_sec: int | None
+    max_execution_sec: int | None
 
 
 def _invalid(message: str) -> WorkerError:
@@ -152,6 +153,7 @@ def parse_envelope(job_input: dict, *, now: datetime) -> Envelope:
             deadline_at=None,
             no_progress_sec=None,
             no_progress_load_sec=None,
+            max_execution_sec=None,
         )
 
     unknown = set(job_input) - _WORKFLOW_KEYS
@@ -211,6 +213,12 @@ def parse_envelope(job_input: dict, *, now: datetime) -> Envelope:
     ):
         raise _invalid("limits.no_progress_load_sec must be a positive integer")
 
+    max_execution_sec = limits.get("max_execution_sec")
+    if max_execution_sec is not None and (
+        not isinstance(max_execution_sec, int) or isinstance(max_execution_sec, bool) or max_execution_sec < 1
+    ):
+        raise _invalid("limits.max_execution_sec must be a positive integer")
+
     return Envelope(
         kind="workflow",
         workflow=workflow,
@@ -219,6 +227,7 @@ def parse_envelope(job_input: dict, *, now: datetime) -> Envelope:
         deadline_at=deadline_at,
         no_progress_sec=no_progress_sec,
         no_progress_load_sec=no_progress_load_sec,
+        max_execution_sec=max_execution_sec,
     )
 
 
