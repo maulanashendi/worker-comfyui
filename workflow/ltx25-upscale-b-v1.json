@@ -317,8 +317,8 @@
         1
       ],
       "crop": "disabled",
-      "use_tiled_encode": false,
-      "tile_size": 256,
+      "use_tiled_encode": true,
+      "tile_size": 512,
       "tile_overlap": 64,
       "use_streaming": false,
       "tile_frames": 0

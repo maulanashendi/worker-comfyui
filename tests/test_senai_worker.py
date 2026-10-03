@@ -46,7 +46,9 @@ def make_workflow(sampler_class="KSampler"):
     }
 
 
-def make_job_input(workflow, *, deadline_at=None, no_progress_sec=None, no_progress_load_sec=None):
+def make_job_input(
+    workflow, *, deadline_at=None, no_progress_sec=None, no_progress_load_sec=None, max_execution_sec=None
+):
     trace = {
         "generation_id": "gen-1",
         "attempt": 1,
@@ -61,6 +63,8 @@ def make_job_input(workflow, *, deadline_at=None, no_progress_sec=None, no_progr
         limits["no_progress_sec"] = no_progress_sec
     if no_progress_load_sec is not None:
         limits["no_progress_load_sec"] = no_progress_load_sec
+    if max_execution_sec is not None:
+        limits["max_execution_sec"] = max_execution_sec
     return {"protocol": PROTOCOL, "workflow": workflow, "inputs": [], "trace": trace, "limits": limits}
 
 
@@ -246,6 +250,141 @@ def test_execution_deadline(tmp_path, worker_env):
         assert result["status"] == "error"
         assert result["failure"]["code"] == "EXECUTION_DEADLINE"
         assert elapsed < 8.0
+    finally:
+        fake.stop()
+
+
+# ---- 4b: max_execution_sec budget ----
+def test_max_execution_sec_budget_triggers_deadline_before_platform_timeout(tmp_path, worker_env):
+    fake, client = make_comfy(tmp_path)
+    try:
+        fake.ws_script = [{"message": executing("10")}] + [
+            {"delay": 0.3, "message": progress_state({"10": {"value": i, "max": 20, "state": "running"}})}
+            for i in range(40)
+        ]
+        boot_state = make_boot_state(tmp_path, fake, client)
+        deadline_at = iso(datetime.now(timezone.utc) + timedelta(hours=1))
+        job_input = make_job_input(make_workflow(), deadline_at=deadline_at, max_execution_sec=35)
+        start = time.monotonic()
+        result = senai_worker.run_job({"id": "job-4b", "input": job_input}, boot_state=boot_state, comfy=client)
+        elapsed = time.monotonic() - start
+        validate_response(result)
+        assert result["status"] == "error"
+        assert result["failure"]["code"] == "EXECUTION_DEADLINE"
+        # budget = max_execution_sec (35) - PLATFORM_TIMEOUT_MARGIN_SEC (30) = 5s
+        assert 4.0 <= elapsed < 10.0
+    finally:
+        fake.stop()
+
+
+def test_max_execution_sec_budget_clamped_to_one_second(tmp_path, worker_env):
+    fake, client = make_comfy(tmp_path)
+    try:
+        fake.ws_script = [{"message": executing("10")}] + [
+            {"delay": 0.3, "message": progress_state({"10": {"value": i, "max": 20, "state": "running"}})}
+            for i in range(40)
+        ]
+        boot_state = make_boot_state(tmp_path, fake, client)
+        deadline_at = iso(datetime.now(timezone.utc) + timedelta(hours=1))
+        job_input = make_job_input(make_workflow(), deadline_at=deadline_at, max_execution_sec=10)
+        start = time.monotonic()
+        result = senai_worker.run_job({"id": "job-4c", "input": job_input}, boot_state=boot_state, comfy=client)
+        elapsed = time.monotonic() - start
+        validate_response(result)
+        assert result["status"] == "error"
+        assert result["failure"]["code"] == "EXECUTION_DEADLINE"
+        assert elapsed < 5.0
+    finally:
+        fake.stop()
+
+
+# ---- 4d: EXECUTION_DEADLINE message includes node location ----
+def test_execution_deadline_message_includes_node_location(tmp_path, worker_env):
+    fake, client = make_comfy(tmp_path)
+    try:
+        fake.ws_script = [
+            {"message": executing("10")},
+            {"message": progress_state({"10": {"value": 2, "max": 4, "state": "running"}})},
+        ] + [
+            {"delay": 0.3, "message": progress_state({"10": {"value": 2, "max": 4, "state": "running"}})}
+            for _ in range(20)
+        ]
+        boot_state = make_boot_state(tmp_path, fake, client)
+        deadline_at = iso(datetime.now(timezone.utc) + timedelta(seconds=1))
+        job_input = make_job_input(make_workflow(sampler_class="KSampler"), deadline_at=deadline_at)
+        result = senai_worker.run_job({"id": "job-4d", "input": job_input}, boot_state=boot_state, comfy=client)
+        validate_response(result)
+        assert result["status"] == "error"
+        assert result["failure"]["code"] == "EXECUTION_DEADLINE"
+        assert "at node 10 (KSampler) 2/4" in result["failure"]["message"]
+    finally:
+        fake.stop()
+
+
+# ---- 4e: node_sec timings ----
+def test_node_sec_recorded_on_success(tmp_path, worker_env):
+    fake, client = make_comfy(tmp_path)
+    try:
+        fake.history_store["p1"] = {"outputs": {"11": {"videos": [{"filename": "out.mp4", "subfolder": "", "type": "output"}]}}}
+        fake.ws_script = [
+            {"message": executing("10")},
+            {"delay": 0.05, "message": progress_state({"10": {"value": 1, "max": 2, "state": "running"}})},
+            {"delay": 0.05, "message": executing("11")},
+            {"delay": 0.05, "message": progress_state({"11": {"value": 1, "max": 1, "state": "running"}})},
+            {"delay": 0.05, "message": executing(None)},
+        ]
+        write_output_file(worker_env["output_dir"], "out.mp4")
+        boot_state = make_boot_state(tmp_path, fake, client)
+        job_input = make_job_input(make_workflow())
+
+        result = senai_worker.run_job({"id": "job-4e", "input": job_input}, boot_state=boot_state, comfy=client)
+        validate_response(result)
+        assert result["status"] == "success"
+        node_sec = result["timings"]["node_sec"]
+        assert set(node_sec) == {"10", "11"}
+        assert all(v >= 0 for v in node_sec.values())
+    finally:
+        fake.stop()
+
+
+def test_node_sec_recorded_on_deadline_error(tmp_path, worker_env):
+    fake, client = make_comfy(tmp_path)
+    try:
+        fake.ws_script = [{"message": executing("10")}] + [
+            {"delay": 0.3, "message": progress_state({"10": {"value": i, "max": 20, "state": "running"}})}
+            for i in range(20)
+        ]
+        boot_state = make_boot_state(tmp_path, fake, client)
+        deadline_at = iso(datetime.now(timezone.utc) + timedelta(seconds=1))
+        job_input = make_job_input(make_workflow(), deadline_at=deadline_at)
+        result = senai_worker.run_job({"id": "job-4f", "input": job_input}, boot_state=boot_state, comfy=client)
+        validate_response(result)
+        assert result["status"] == "error"
+        assert result["failure"]["code"] == "EXECUTION_DEADLINE"
+        assert "10" in result["timings"]["node_sec"]
+        assert result["timings"]["node_sec"]["10"] >= 0
+    finally:
+        fake.stop()
+
+
+def test_node_sec_recorded_on_execution_error(tmp_path, worker_env):
+    fake, client = make_comfy(tmp_path)
+    try:
+        fake.ws_script = [
+            {"message": executing("10")},
+            {"delay": 0.05, "message": progress_state({"10": {"value": 1, "max": 2, "state": "running"}})},
+            {"delay": 0.05, "message": executing("11")},
+            {"delay": 0.05, "message": execution_error("11", "SaveVideo")},
+        ]
+        boot_state = make_boot_state(tmp_path, fake, client)
+        job_input = make_job_input(make_workflow())
+
+        result = senai_worker.run_job({"id": "job-4g", "input": job_input}, boot_state=boot_state, comfy=client)
+        validate_response(result)
+        assert result["status"] == "error"
+        node_sec = result["timings"]["node_sec"]
+        assert set(node_sec) == {"10", "11"}
+        assert node_sec["11"] > 0
     finally:
         fake.stop()
 

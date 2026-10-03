@@ -175,6 +175,46 @@ def test_idle_exit_watchdog_waits_while_job_runs():
     cloudrun_server._RUN_LOCK.release()
 
 
+def test_run_envelope_with_max_execution_sec_not_invalid_envelope(server):
+    # Exercises the real handler.handler -> senai_worker.run_job -> guard.parse_envelope
+    # path (handler is NOT mocked here) to prove the cloudrun transport doesn't add any
+    # envelope restriction on top of the shared handler: limits.max_execution_sec must
+    # pass guard validation. _BOOT_STATE is left at its default (None), so run_job fails
+    # later with INTERNAL once it tries to read boot_state.served_jobs — the point is
+    # that failure is not INVALID_ENVELOPE.
+    from datetime import datetime, timedelta, timezone
+
+    deadline_at = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    job_input = {
+        "protocol": "senai-worker/1",
+        "workflow": {"10": {"class_type": "KSampler", "inputs": {}}},
+        "inputs": [],
+        "trace": {
+            "generation_id": "gen-1",
+            "attempt": 1,
+            "binding_alias": "b",
+            "binding_revision": 1,
+            "adapter": "a",
+            "workflow_id": "w",
+            "graph_sha256": "a" * 64,
+        },
+        "limits": {"deadline_at": deadline_at, "max_execution_sec": 60},
+    }
+    # INTERNAL is refresh:true (contract §5), so the real handler sets
+    # refresh_worker=True and cloudrun_server would call _schedule_refresh_exit(),
+    # whose threading.Timer fires os._exit(0) a second later and kills the whole
+    # pytest process. Stub it out, same as this file never lets a real exit_fn run
+    # (see test_idle_exit_watchdog_* passing exit_fn=exits.append).
+    with patch.object(cloudrun_server.handler_module, "_BOOT_STATE", None), patch.object(
+        cloudrun_server, "_schedule_refresh_exit"
+    ):
+        status, data = _post(server, "/run", json.dumps({"input": job_input}).encode())
+
+    assert status == 200
+    assert data["output"]["status"] == "error"
+    assert data["output"]["failure"]["code"] != "INVALID_ENVELOPE"
+
+
 def test_collect_outputs_skips_input_echoes(tmp_path):
     import media_output
     out = tmp_path / "video.mp4"
