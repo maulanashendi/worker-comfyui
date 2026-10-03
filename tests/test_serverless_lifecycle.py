@@ -156,6 +156,124 @@ def test_boot_continues_unready_and_records_full_timeline(tmp_path):
     assert stages == ['start', 'gpu_check', 'model_verify', 'comfy_start']
 
 
+# --- Cloud Run overlap: ComfyUI launched in parallel with model staging ----
+
+OVERLAP_FAKE_PYTHON = '''#!/usr/bin/env python3
+import os, sys, time
+from pathlib import Path
+if '-c' in sys.argv:
+    print('OK: mock GPU'); sys.exit(0)
+argv = sys.argv
+if any('workflow_models.py' in a for a in argv):
+    if '--stage-list' in argv:
+        print('models--Org--Repo/snapshots/' + 'a' * 40 + '/vae/a.safetensors')
+        sys.exit(0)
+    if '--write-paths' in argv:
+        Path(os.environ['WORKFLOW_MODEL_PATHS']).write_text('workflow_models: {base_path: "/x"}\\n')
+        print('')
+        sys.exit(0)
+    if '--verify' in argv:
+        Path(os.environ['SENAI_WORKER_STATE']).write_text('{"ready": true, "custom_nodes": []}')
+        sys.exit(0)
+    sys.exit(0)
+role = 'comfy' if any('main.py' in a for a in argv) else 'handler'
+Path(os.environ['TEST_ROOT'], role + '.pid').write_text(str(os.getpid()))
+time.sleep(60)
+'''
+
+
+def _overlap_bin_dir(tmp_path):
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    fake = bin_dir / 'python'
+    fake.write_text('#!' + sys.executable + '\n' + OVERLAP_FAKE_PYTHON.split('\n', 1)[1])
+    fake.chmod(0o755)
+    (bin_dir / 'python3').symlink_to(fake)
+    return bin_dir
+
+
+def _overlap_env(tmp_path, *, bin_dir, hf_cache_root, stage_dir):
+    return {
+        **os.environ, 'PATH': str(bin_dir) + ':' + os.environ['PATH'], 'TEST_ROOT': str(tmp_path),
+        'PUBLIC_KEY': '', 'WORKFLOWS': 'ltx25.yaml', 'SENAI_TRANSPORT': 'cloudrun',
+        'HF_CACHE_ROOT': str(hf_cache_root), 'SENAI_HF_STAGE_DIR': str(stage_dir),
+        'COMFY_MODEL_ROOT': str(tmp_path / 'models'), 'MODEL_DOWNLOAD_POLICY': 'cache-only',
+        'COMFY_PID_FILE': str(tmp_path / 'comfyui.pid'),
+        'SENAI_BOOT_TIMELINE': str(tmp_path / 'timeline'),
+        'SENAI_WORKER_STATE': str(tmp_path / 'state.json'),
+        'WORKFLOW_MODEL_PATHS': str(tmp_path / 'paths.yaml'),
+        'AWS_BUCKET_NAME': 'staging',
+        'PORT': '0',
+    }
+
+
+def test_overlap_launches_comfyui_before_staging_and_verify(tmp_path):
+    # Staging source has the one file --stage-list names, so the real `cp` the
+    # script shells out to actually succeeds (stage_cmd must use real cp/xargs;
+    # only python is faked here).
+    bin_dir = _overlap_bin_dir(tmp_path)
+    hf_cache_root = tmp_path / 'hf-cache'
+    source = hf_cache_root / 'models--Org--Repo' / 'snapshots' / ('a' * 40) / 'vae' / 'a.safetensors'
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b'weights')
+    stage_dir = tmp_path / 'stage-hub'
+
+    env = _overlap_env(tmp_path, bin_dir=bin_dir, hf_cache_root=hf_cache_root, stage_dir=stage_dir)
+    proc = subprocess.Popen(['bash', str(ROOT / 'src/start.sh')], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        deadline = time.monotonic() + 5
+        while not ((tmp_path / 'comfy.pid').exists() and (tmp_path / 'handler.pid').exists()) and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert (tmp_path / 'comfy.pid').exists()
+        assert (tmp_path / 'handler.pid').exists()
+        proc.terminate()
+        output, _ = proc.communicate(timeout=10)
+        assert proc.returncode == 143, output.decode()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    # ComfyUI starts right after gpu_check — before model_stage/model_verify — and
+    # is never relaunched (one comfy_start only) because staging actually succeeded.
+    stages = [line.split()[0] for line in (tmp_path / 'timeline').read_text().splitlines()]
+    assert stages == ['start', 'gpu_check', 'comfy_start', 'model_stage', 'model_verify']
+    assert (stage_dir / 'models--Org--Repo' / 'snapshots' / ('a' * 40) / 'vae' / 'a.safetensors').is_file()
+
+
+def test_overlap_restarts_comfyui_after_staging_failure(tmp_path):
+    # --stage-list names a file that was never actually created under HF_CACHE_ROOT,
+    # so the real `cp` fails and start.sh must kill the early ComfyUI (launched
+    # against the now-wrong $stage_dir config) and relaunch it once model_verify
+    # has pointed workflow_model_paths.yaml at the real (un-staged) location.
+    bin_dir = _overlap_bin_dir(tmp_path)
+    hf_cache_root = tmp_path / 'hf-cache'
+    hf_cache_root.mkdir()
+    stage_dir = tmp_path / 'stage-hub'
+
+    env = _overlap_env(tmp_path, bin_dir=bin_dir, hf_cache_root=hf_cache_root, stage_dir=stage_dir)
+    proc = subprocess.Popen(['bash', str(ROOT / 'src/start.sh')], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        deadline = time.monotonic() + 5
+        while not ((tmp_path / 'comfy.pid').exists() and (tmp_path / 'handler.pid').exists()) and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert (tmp_path / 'comfy.pid').exists()
+        assert (tmp_path / 'handler.pid').exists()
+        proc.terminate()
+        output, _ = proc.communicate(timeout=10)
+        assert proc.returncode == 143, output.decode()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    stages = [line.split()[0] for line in (tmp_path / 'timeline').read_text().splitlines()]
+    # comfy_start appears twice: the early (killed) launch, then the restart after
+    # model_verify corrected the config.
+    assert stages == ['start', 'gpu_check', 'comfy_start', 'model_stage', 'model_verify', 'comfy_start']
+    assert not list(stage_dir.rglob('*.safetensors')), 'staging must not have copied anything on failure'
+
+
 LOGGING_FAKE_PYTHON = '''#!/usr/bin/env python3
 import os,sys,time
 from pathlib import Path

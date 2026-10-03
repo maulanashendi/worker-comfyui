@@ -1,0 +1,5 @@
+---
+"worker-comfyui": patch
+---
+
+On Cloud Run cold starts, launch ComfyUI right after the GPU pre-flight check instead of after model staging + verify, so its ~11s import/custom-node-load window runs concurrently with the ~47s staging copy instead of after it. `workflow_model_paths.yaml` and the custom-node whitelist — both derivable from the manifest plan's HF repo/revision strings alone, without touching the filesystem — are now written by a new `workflow_models.py --write-paths` mode before staging starts, decoupled from `--verify` (which still runs after staging and still gates readiness: `/ready` only turns healthy once `senai_worker.boot()` reads `ready: true` from the state file `--verify` writes, unchanged). If staging fails, the early-started ComfyUI (pointed at the now-empty staging directory) is killed and restarted against the corrected config `--verify` writes for the un-staged cache — the RunPod path, and any Cloud Run boot where the early write doesn't happen, are unaffected.
