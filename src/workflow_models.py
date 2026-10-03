@@ -326,12 +326,17 @@ def download_all(plan, workers, budget_sec):
         raise errors[0]
 
 
-def resolve_snapshot_dir(hf_cache_root, repo, revision):
+def resolve_snapshot_dir(hf_cache_root, repo, revision, *, ref_lookup_root=None):
+    """`ref_lookup_root` lets the caller resolve a branch/tag revision's refs/<rev>
+    file against a different (already-populated) directory than the one `hf_cache_root`
+    paths are being built for — e.g. when writing paths for a not-yet-staged
+    destination, where refs/<rev> can only be read from the pre-stage source."""
     org, name = repo.split('/', 1)
     repo_dir = hf_cache_root / f'models--{org}--{name}'
     rev = revision or 'main'
     if not re.fullmatch(r'[0-9a-fA-F]{40}', rev):
-        ref_file = repo_dir / 'refs' / rev
+        lookup_dir = (ref_lookup_root or hf_cache_root) / f'models--{org}--{name}'
+        ref_file = lookup_dir / 'refs' / rev
         if ref_file.is_file():
             rev = ref_file.read_text().strip()
     return repo_dir / 'snapshots' / rev
@@ -370,6 +375,37 @@ def stage_files(plan, hf_cache_root):
         if candidate.is_file():
             files.add(str(candidate.relative_to(hf_cache_root)))
     return sorted(files)
+
+
+def run_write_paths(*, ref_lookup_root=None):
+    """Write workflow_model_paths.yaml (and print the custom-node whitelist, one line,
+    space-separated) from the manifest plan alone — the same two things `--verify`
+    derives from it, minus the filesystem checks. The plan only encodes HF repo +
+    pinned revision strings, so both are computable before any model bytes exist on
+    disk, which lets start.sh write the config and launch ComfyUI in parallel with a
+    model-staging copy instead of waiting for it to finish (ComfyUI reads
+    --extra-model-paths-config once at startup, so the file must exist and be correct
+    before that process launches, not merely by the time jobs arrive).
+
+    `hf_cache_root` (HF_CACHE_ROOT) is expected to be the destination the staging copy
+    is about to populate, which obviously can't satisfy a refs/<rev> lookup yet for an
+    unpinned revision; pass `ref_lookup_root` pointing at the pre-stage source (already
+    populated) for that case. Every model in this repo's manifests pins a 40-hex
+    revision today, so this never actually triggers, but the fallback keeps the
+    function correct if that changes.
+
+    Raises (propagates) if the manifest selection can't be loaded — the caller falls
+    back to the sequential (write-after-stage) boot in that case."""
+    selection = os.getenv('WORKFLOWS') or os.getenv('WORKFLOW_MANIFESTS', '')
+    if not selection:
+        raise SystemExit('No workflows selected')
+    root = Path(os.getenv('WORKFLOW_DIR', '/workflow'))
+    model_root = Path(os.getenv('COMFY_MODEL_ROOT', '/comfyui/models'))
+    hf_cache_root = Path(os.getenv('HF_CACHE_ROOT', '/runpod-volume/huggingface-cache/hub'))
+    paths_path = Path(os.getenv('WORKFLOW_MODEL_PATHS', '/tmp/workflow_model_paths.yaml'))
+    manifests = load_manifests(selection, root, model_root)
+    write_model_paths(manifests.plan, model_root, hf_cache_root, paths_path, ref_lookup_root=ref_lookup_root)
+    print(' '.join(dict.fromkeys(manifests.custom_nodes)))
 
 
 def run_stage_list():
@@ -421,14 +457,14 @@ def raw_manifest_sha256(selection, workflow_root):
     return digest.hexdigest()
 
 
-def write_model_paths(plan, model_root, hf_cache_root, path):
+def write_model_paths(plan, model_root, hf_cache_root, path, *, ref_lookup_root=None):
     """One `extra_model_paths` section per HF snapshot repo used, plus the COMFY_MODEL_ROOT fallback."""
     config = {}
     for item in plan.values():
         hf = item.get('hf')
         if not hf:
             continue
-        base = resolve_snapshot_dir(hf_cache_root, hf['repo'], hf.get('revision'))
+        base = resolve_snapshot_dir(hf_cache_root, hf['repo'], hf.get('revision'), ref_lookup_root=ref_lookup_root)
         key = 'hf_' + re.sub(r'[^a-z0-9]+', '_', hf['repo'].lower()).strip('_')
         category = Path(item['path']).parts[0]
         folder = hf_category_dir(item['path'], hf['file']) + '/'
@@ -568,12 +604,20 @@ def main():
     parser.add_argument('--check', action='store_true', help='Validate and print checklist; no downloads or worker startup')
     parser.add_argument('--verify', action='store_true', help='Verify cached models against the manifest and write boot state; never downloads')
     parser.add_argument('--stage-list', action='store_true', help='Print the HF-cache-relative files the selected WORKFLOWS need (for boot staging)')
+    parser.add_argument('--write-paths', action='store_true',
+                         help='Write workflow_model_paths.yaml and print the custom-node whitelist from the manifest plan alone, before any staging copy')
+    parser.add_argument('--ref-lookup-root',
+                         help='Resolve a non-sha revision refs/<rev> file against this root instead of HF_CACHE_ROOT '
+                              '(use with --write-paths when HF_CACHE_ROOT is a not-yet-populated staging destination)')
     args = parser.parse_args()
     if args.stage_list:
         run_stage_list()
         return
     if args.verify:
         run_verify()
+        return
+    if args.write_paths:
+        run_write_paths(ref_lookup_root=Path(args.ref_lookup_root) if args.ref_lookup_root else None)
         return
     selection = os.getenv('WORKFLOWS') or os.getenv('WORKFLOW_MANIFESTS', '')
     if not selection:

@@ -85,6 +85,60 @@ fi
 TCMALLOC="$(ldconfig -p | grep -Po "libtcmalloc.so.\d" | head -n 1 || true)"
 if [ -n "$TCMALLOC" ]; then export LD_PRELOAD="${TCMALLOC}"; fi
 
+# Starts ComfyUI (sets $comfy_pid) using the current $whitelist_nodes and
+# $WORKFLOW_MODEL_PATHS. Called either right after the GPU check (Cloud Run,
+# overlapped with model staging) or after model_verify (every other case,
+# and as the Cloud Run fallback when staging/the early path-config write
+# didn't happen) — same args either way, so the two launch sites can't drift.
+launch_comfyui() {
+    # Ensure ComfyUI-Manager runs in offline network mode inside the container
+    comfy-manager-set-mode offline || echo "worker-comfyui - Could not set ComfyUI-Manager network_mode" >&2
+
+    echo "worker-comfyui: Starting ComfyUI"
+
+    # Allow operators to tweak verbosity; default is INFO.
+    : "${COMFY_LOG_LEVEL:=INFO}"
+
+    comfy_args=(--disable-auto-launch --disable-metadata --verbose "$COMFY_LOG_LEVEL" --log-stdout)
+    if [ -n "${WORKFLOWS:-${WORKFLOW_MANIFESTS:-}}" ]; then
+        comfy_args+=(--extra-model-paths-config "${WORKFLOW_MODEL_PATHS:-/tmp/workflow_model_paths.yaml}")
+    fi
+    comfy_args+=(--disable-all-custom-nodes)
+    if [ -n "$whitelist_nodes" ]; then
+        # shellcheck disable=SC2086 # word-split on purpose: one arg per node folder name
+        comfy_args+=(--whitelist-custom-nodes $whitelist_nodes)
+    fi
+    if [ "$SENAI_TRANSPORT" = "cloudrun" ] || [ "$SENAI_TRANSPORT" = "cloudrun-job" ]; then
+        # Weights are staged in memory (above), so mmap is cheap and avoids a second
+        # in-RAM copy; 96 GB of VRAM holds the whole LTX set between jobs. Cloud Run
+        # pins 20 vCPU to exactly 80 GiB, so skip the ~64 GB pinned offload buffer
+        # that --highvram never uses.
+        comfy_args+=(--highvram --disable-pinned-memory)
+    fi
+    if [ "${SERVE_API_LOCALLY:-false}" = "true" ]; then
+        comfy_args+=(--listen)
+    fi
+    python -u "$COMFY_ROOT/main.py" "${comfy_args[@]}" &
+    comfy_pid=$!
+    echo "$comfy_pid" > "$COMFY_PID_FILE"
+    record_stage comfy_start
+    # R&D only: one memory line every MEM_SAMPLE_SEC (off when 0/unset). Staged
+    # weights live in tmpfs (Shmem), so avail = what jobs can still grow into.
+    if [ "${MEM_SAMPLE_SEC:-0}" != "0" ]; then
+        (
+            cg=/sys/fs/cgroup/memory.current
+            [ -r "$cg" ] || cg=/sys/fs/cgroup/memory/memory.usage_in_bytes
+            while kill -0 "$comfy_pid" 2>/dev/null; do
+                awk -v rss="$(awk '/^VmRSS/{print int($2/1024)}' /proc/$comfy_pid/status 2>/dev/null)" \
+                    -v cgm="$( [ -r "$cg" ] && echo $(( $(cat "$cg") >> 20 )) )" \
+                    '/^MemTotal/{t=$2} /^MemAvailable/{a=$2} /^Shmem:/{s=$2}
+                     END{printf "memsample total_mb=%d avail_mb=%d shmem_mb=%d comfy_rss_mb=%s cgroup_mb=%s\n", t/1024, a/1024, s/1024, rss, cgm}' /proc/meminfo
+                sleep "$MEM_SAMPLE_SEC"
+            done
+        ) &
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # GPU pre-flight check
 # Verify that the GPU is accessible before starting ComfyUI. If PyTorch
@@ -128,6 +182,7 @@ record_stage gpu_check
 # (RAM is capped at 80 GiB, so the bucket may hold more than one set fits); if
 # that list can't be produced, the whole cache is copied as before. A failed
 # copy keeps the mount as HF_CACHE_ROOT so boot still proceeds.
+whitelist_nodes=""
 if { [ "$SENAI_TRANSPORT" = "cloudrun" ] || [ "$SENAI_TRANSPORT" = "cloudrun-job" ]; } && [ -d "${HF_CACHE_ROOT:-}" ]; then
     # Internal-only knob (not part of the senai-worker/1 contract env list): lets
     # tests stage somewhere other than /tmp.
@@ -140,6 +195,23 @@ if { [ "$SENAI_TRANSPORT" = "cloudrun" ] || [ "$SENAI_TRANSPORT" = "cloudrun-job
     if python3 "$WORKER_ROOT/workflow_models.py" --stage-list > "$stage_list" && [ -s "$stage_list" ]; then
         echo "worker-comfyui: staging $(wc -l < "$stage_list") manifest files from $HF_CACHE_ROOT into $stage_dir"
         stage_cmd() { tr '\n' '\0' < "$stage_list" | copy_listed; }
+
+        # Overlap: workflow_model_paths.yaml only encodes HF repo + pinned revision
+        # strings (never checks the filesystem for anything but a branch/tag's
+        # refs/<rev>, see --ref-lookup-root below), so it — and the custom-node
+        # whitelist, derived the same way — are known before a single byte is
+        # staged. Write them now and launch ComfyUI immediately instead of after
+        # the ~47s copy, so its own ~11s import/custom-node-load window runs
+        # concurrently with staging instead of after it.
+        if whitelist_nodes="$(HF_CACHE_ROOT="$stage_dir" python3 "$WORKER_ROOT/workflow_models.py" \
+            --write-paths --ref-lookup-root "$HF_CACHE_ROOT")"; then
+            echo "worker-comfyui: wrote ${WORKFLOW_MODEL_PATHS:-/tmp/workflow_model_paths.yaml} ahead of staging; starting ComfyUI now"
+            launch_comfyui
+            comfy_started_early=true
+        else
+            whitelist_nodes=""
+            echo "worker-comfyui: could not pre-write model paths; ComfyUI start stays sequential" >&2
+        fi
     else
         echo "worker-comfyui: manifest file list unavailable; staging all of $HF_CACHE_ROOT into $stage_dir" >&2
         stage_cmd() { (cd "$HF_CACHE_ROOT" && find . -type f -print0) | copy_listed; }
@@ -149,6 +221,19 @@ if { [ "$SENAI_TRANSPORT" = "cloudrun" ] || [ "$SENAI_TRANSPORT" = "cloudrun-job
         echo "worker-comfyui: staged $(du -sb "$stage_dir" | cut -f1) bytes"
     else
         echo "worker-comfyui: model staging failed; reading from $HF_CACHE_ROOT directly" >&2
+        if [ "${comfy_started_early:-false}" = true ]; then
+            # The early config pointed ComfyUI at $stage_dir, which this container
+            # will never populate now. That config is baked into the already-running
+            # process (ComfyUI only reads --extra-model-paths-config at startup), so
+            # rewriting the file on disk can't fix it — restart against the
+            # corrected config model_verify is about to write for the (slower, but
+            # working) un-staged $HF_CACHE_ROOT.
+            echo "worker-comfyui: stopping the early ComfyUI start; it will restart after model_verify" >&2
+            kill -TERM "$comfy_pid" 2>/dev/null || true
+            wait "$comfy_pid" 2>/dev/null || true
+            comfy_pid=""
+            comfy_started_early=false
+        fi
     fi
     rm -f "$stage_list"
     record_stage model_stage
@@ -169,9 +254,20 @@ python3 "$WORKER_ROOT/workflow_models.py" --verify \
     || echo "worker-comfyui: model verification reported an issue; continuing in unready mode" >&2
 record_stage model_verify
 
-whitelist_nodes=""
-if [ -f "$SENAI_WORKER_STATE" ]; then
-    whitelist_nodes="$(python3 -c "
+handler_args=()
+if [ "${SERVE_API_LOCALLY:-false}" = "true" ]; then
+    handler_args+=(--rp_serve_api --rp_api_host=0.0.0.0)
+fi
+
+# If the Cloud Run overlap path above already started ComfyUI, it's running
+# against the now-verified (or, on a staging failure, now-corrected) config —
+# nothing to do. Every other case (RunPod; Cloud Run without the early write;
+# the restart after a staging failure, which cleared comfy_pid) starts it here,
+# exactly as before, now that model_verify has (re)computed the whitelist.
+if [ -z "$comfy_pid" ]; then
+    whitelist_nodes=""
+    if [ -f "$SENAI_WORKER_STATE" ]; then
+        whitelist_nodes="$(python3 -c "
 import json, sys
 try:
     state = json.load(open(sys.argv[1]))
@@ -179,55 +275,8 @@ try:
 except Exception:
     pass
 " "$SENAI_WORKER_STATE" 2>/dev/null || true)"
-fi
-
-# Ensure ComfyUI-Manager runs in offline network mode inside the container
-comfy-manager-set-mode offline || echo "worker-comfyui - Could not set ComfyUI-Manager network_mode" >&2
-
-echo "worker-comfyui: Starting ComfyUI"
-
-# Allow operators to tweak verbosity; default is INFO.
-: "${COMFY_LOG_LEVEL:=INFO}"
-
-comfy_args=(--disable-auto-launch --disable-metadata --verbose "$COMFY_LOG_LEVEL" --log-stdout)
-if [ -n "${WORKFLOWS:-${WORKFLOW_MANIFESTS:-}}" ]; then
-    comfy_args+=(--extra-model-paths-config "${WORKFLOW_MODEL_PATHS:-/tmp/workflow_model_paths.yaml}")
-fi
-comfy_args+=(--disable-all-custom-nodes)
-if [ -n "$whitelist_nodes" ]; then
-    # shellcheck disable=SC2086 # word-split on purpose: one arg per node folder name
-    comfy_args+=(--whitelist-custom-nodes $whitelist_nodes)
-fi
-if [ "$SENAI_TRANSPORT" = "cloudrun" ] || [ "$SENAI_TRANSPORT" = "cloudrun-job" ]; then
-    # Weights are staged in memory (above), so mmap is cheap and avoids a second
-    # in-RAM copy; 96 GB of VRAM holds the whole LTX set between jobs. Cloud Run
-    # pins 20 vCPU to exactly 80 GiB, so skip the ~64 GB pinned offload buffer
-    # that --highvram never uses.
-    comfy_args+=(--highvram --disable-pinned-memory)
-fi
-handler_args=()
-if [ "${SERVE_API_LOCALLY:-false}" = "true" ]; then
-    comfy_args+=(--listen)
-    handler_args+=(--rp_serve_api --rp_api_host=0.0.0.0)
-fi
-python -u "$COMFY_ROOT/main.py" "${comfy_args[@]}" &
-comfy_pid=$!
-echo "$comfy_pid" > "$COMFY_PID_FILE"
-record_stage comfy_start
-# R&D only: one memory line every MEM_SAMPLE_SEC (off when 0/unset). Staged
-# weights live in tmpfs (Shmem), so avail = what jobs can still grow into.
-if [ "${MEM_SAMPLE_SEC:-0}" != "0" ]; then
-    (
-        cg=/sys/fs/cgroup/memory.current
-        [ -r "$cg" ] || cg=/sys/fs/cgroup/memory/memory.usage_in_bytes
-        while kill -0 "$comfy_pid" 2>/dev/null; do
-            awk -v rss="$(awk '/^VmRSS/{print int($2/1024)}' /proc/$comfy_pid/status 2>/dev/null)" \
-                -v cgm="$( [ -r "$cg" ] && echo $(( $(cat "$cg") >> 20 )) )" \
-                '/^MemTotal/{t=$2} /^MemAvailable/{a=$2} /^Shmem:/{s=$2}
-                 END{printf "memsample total_mb=%d avail_mb=%d shmem_mb=%d comfy_rss_mb=%s cgroup_mb=%s\n", t/1024, a/1024, s/1024, rss, cgm}' /proc/meminfo
-            sleep "$MEM_SAMPLE_SEC"
-        done
-    ) &
+    fi
+    launch_comfyui
 fi
 if [ "$SENAI_TRANSPORT" = "cloudrun" ]; then
     echo "worker-comfyui: Starting Cloud Run HTTP transport"

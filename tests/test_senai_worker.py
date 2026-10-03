@@ -587,6 +587,32 @@ def test_boot_never_ready_times_out_quickly(tmp_path):
         fake.stop()
 
 
+# ---- 15: boot stays unready while ComfyUI is reachable but staging/verify hasn't finished ----
+def test_boot_stays_unready_while_comfyui_reachable_before_verify(tmp_path):
+    # Overlap boot: ComfyUI can be up and answering /system_stats while staging/
+    # verify (which write this state file) are still running in parallel.
+    # Readiness must come from the state file's `ready` flag, never merely from
+    # reachability, or a job could be dispatched to a worker with no models staged.
+    fake, client = make_comfy(tmp_path)
+    try:
+        state_path = tmp_path / "state.json"
+        timeline_path = tmp_path / "timeline"
+        state_path.write_text(json.dumps({
+            "protocol": PROTOCOL, "workflows": "test.yaml", "manifest_sha256": "b" * 64, "comfyui": "v0.36.0",
+            "ready": False, "unready_code": "MODEL_CACHE_MISSING", "unready_message": "staging in progress",
+            "models": {}, "declared_model_names": [], "allowed_class_types": [],
+            "custom_nodes": [], "limits": {}, "warmup_graph": None,
+        }))
+        timeline_path.write_text(f"start {time.time()}\n")
+
+        boot_state = senai_worker.boot(state_path=state_path, timeline_path=timeline_path, comfy=client, ready_timeout_sec=1)
+
+        assert boot_state.ready is False
+        assert boot_state.unready_code == "MODEL_CACHE_MISSING"
+    finally:
+        fake.stop()
+
+
 # ---- 15: REFRESH_WORKER=never suppresses refresh even on oom ----
 def test_refresh_worker_never_suppresses_flag(tmp_path, worker_env, monkeypatch):
     monkeypatch.setenv("REFRESH_WORKER", "never")

@@ -471,6 +471,78 @@ def test_default_download_policy_is_cache_only(tmp_path, monkeypatch):
     get.assert_not_called()
 
 
+# --- --write-paths (overlap: config written before staging) -------------
+
+def test_write_paths_matches_verify_without_any_staged_file(tmp_path, monkeypatch, capsys):
+    # The whole point of --write-paths: produce the same workflow_model_paths.yaml
+    # --verify would, with zero files present anywhere (neither the pre-stage
+    # source nor the post-stage destination) — the plan alone is enough.
+    stage_dir = tmp_path / 'stage-hub'
+    model_root = tmp_path / 'comfy-models'
+
+    monkeypatch.setenv('WORKFLOWS', 'ltx25.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
+    monkeypatch.setenv('HF_CACHE_ROOT', str(stage_dir))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    models.run_write_paths()
+
+    assert not stage_dir.exists(), 'must not touch the staging destination'
+    config = yaml.safe_load((tmp_path / 'paths.yaml').read_text())
+    hf_sections = [v for k, v in config.items() if k.startswith('hf_')]
+    assert len(hf_sections) == 2
+    assert all(v['base_path'].startswith(str(stage_dir)) for v in hf_sections)
+    assert 'workflow_models' in config
+
+    whitelist = capsys.readouterr().out.strip()
+    plan = models.load_plan('ltx25.yaml', ROOT / 'workflow', model_root)
+    manifests = models.load_manifests('ltx25.yaml', ROOT / 'workflow', model_root)
+    assert plan  # sanity: ltx25.yaml actually declares models
+    assert whitelist.split() == list(dict.fromkeys(manifests.custom_nodes))
+
+
+def test_write_paths_unpinned_revision_resolves_against_ref_lookup_root(tmp_path, monkeypatch):
+    manifest_path = tmp_path / 'm.yaml'
+    manifest_path.write_text(yaml.safe_dump({
+        'version': 2, 'set': 'x', 'requires_comfyui': '>=0.36.0', 'custom_nodes': [],
+        'workflows': [], 'allowed_class_types_extra': [], 'limits': {}, 'warmup_graph': None,
+        'models': [
+            {'path': 'vae/a.safetensors', 'hf': {'repo': 'Org/Repo', 'revision': 'main', 'file': 'vae/a.safetensors'},
+             'sha256': None, 'bytes': 0},
+        ],
+    }))
+    commit = 'b' * 40
+    source_root = tmp_path / 'source-hub'  # pre-stage mount: already has refs/main
+    (source_root / 'models--Org--Repo' / 'refs').mkdir(parents=True)
+    (source_root / 'models--Org--Repo' / 'refs' / 'main').write_text(commit)
+    stage_dir = tmp_path / 'stage-hub'  # post-stage destination: nothing exists yet
+
+    monkeypatch.setenv('WORKFLOWS', 'm.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(tmp_path))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(tmp_path / 'models'))
+    monkeypatch.setenv('HF_CACHE_ROOT', str(stage_dir))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    models.run_write_paths(ref_lookup_root=source_root)
+
+    config = yaml.safe_load((tmp_path / 'paths.yaml').read_text())
+    [section] = [v for k, v in config.items() if k.startswith('hf_')]
+    assert section['base_path'] == str(stage_dir / 'models--Org--Repo' / 'snapshots' / commit)
+
+
+def test_write_paths_missing_manifest_raises_for_sequential_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv('WORKFLOWS', 'does-not-exist.yaml')
+    monkeypatch.setenv('WORKFLOW_DIR', str(tmp_path))
+    monkeypatch.setenv('COMFY_MODEL_ROOT', str(tmp_path / 'models'))
+    monkeypatch.setenv('HF_CACHE_ROOT', str(tmp_path / 'stage-hub'))
+    monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
+
+    with pytest.raises(Exception):
+        models.run_write_paths()
+    assert not (tmp_path / 'paths.yaml').exists()
+
+
 def test_ltx_workflow_canonical_sha256_matches_contract_pins():
     pins = yaml.safe_load((ROOT / 'contract/senai-worker-1/pins.yaml').read_text())
     pinned = {w['id']: w['sha256_canonical'] for w in pins['workflows'] if w['status'] == 'pinned'}
