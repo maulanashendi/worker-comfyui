@@ -1,7 +1,7 @@
 # Kontrak: RunPod senai-worker (protokol `senai-worker/1`)
 
 Status: **draft mengikat** (lihat urutan otoritas di `contracts/README.md`).
-Versi: `0.3.0` — lihat `pins.yaml` dan `CHANGELOG.md`.
+Versi: `0.4.0` — lihat `pins.yaml` dan `CHANGELOG.md`.
 
 Kontrak ini adalah spesifikasi yang dipakai **kedua sisi** untuk implementasi paralel:
 worker (`maulanashendi/worker-comfyui`, fork `runpod-workers/worker-comfyui`) dan senai
@@ -181,7 +181,7 @@ jalan. Node yang di-cache ComfyUI tidak muncul.
 {
   "status": "healthy",
   "protocol": "senai-worker/1",
-  "worker": {"image": "…", "comfyui": "v0.36.0", "workflows": "ltx25.yaml",
+  "worker": {"image": "…", "comfyui": "v0.36.0", "workflows": "senfers1.yaml",
              "manifest_sha256": "…", "gpu": "NVIDIA L40S", "cuda": "12.8", "vram_gb": 48,
              "ready": true, "unready_code": null,
              "models": {"declared": 6, "present": 6, "missing": [],
@@ -274,7 +274,7 @@ cancel oleh user tidak pernah diulang.
 
 | `provider_endpoints` | Nilai |
 | --- | --- |
-| `adapter` | `ltx25_senai_worker_v1` (graph LTX dari `Ltx25Codec`) atau `minimax_h3_senai_worker_v1` |
+| `adapter` | `senfers1_senai_worker_v1` (graph LTX dari `Senfers1Codec`) atau `minimax_h3_senai_worker_v1` |
 | `contract_version` | `senai-worker/1` |
 | `image_digest` | Digest image yang di-deploy (G3) |
 
@@ -290,7 +290,7 @@ Daftar mesin-terbaca ada di `pins.yaml` (`env`). Yang wajib di setiap endpoint s
 
 | Env | Nilai produksi | Catatan |
 | --- | --- | --- |
-| `WORKFLOWS` | `ltx25.yaml` atau `minimax-h3.yaml` | Selektor set. Hanya manifest yang disebut yang dibaca. |
+| `WORKFLOWS` | `senfers1.yaml` atau `minimax-h3.yaml` | Selektor set. Hanya manifest yang disebut yang dibaca. |
 | `MODEL_DOWNLOAD_POLICY` | `cache-only` | Worker GPU tidak pernah mengunduh bobot. |
 | `HF_CACHE_ROOT` | default `/runpod-volume/huggingface-cache/hub` | Root cached model Hugging Face RunPod. |
 | `AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION=auto`, `AWS_ENDPOINT_URL` | R2 staging | Nama sama dengan endpoint vavo. Tanpa bucket, worker masuk mode unready dengan `OUTPUT_NOT_CONFIGURED`, dan tidak pernah mengirim base64. |

@@ -7,7 +7,7 @@ locate the model in a RunPod Hugging Face cached-model snapshot at boot
 `contract/senai-worker-1/CONTRACT.md` §7). `version: 1` manifests are still
 accepted for backward compatibility, but no set here uses that shape anymore.
 
-`WORKFLOWS=ltx25.yaml` selects the Senai LTX 2.5 stack.
+`WORKFLOWS=senfers1.yaml` selects the Senfers 1.0 (self-hosted LTX 2.5) stack.
 
 The three JSON API graphs were copied unchanged from
 `senai/backend/src/senai/modules/providers/runpod/workflows/` on 2026-09-22.
@@ -38,25 +38,25 @@ before it can be sent through the protocol). No custom node repository is
 required for this set. See the generic cache preparation instructions in the
 deployment guide.
 
-`WORKFLOWS=ltx25-ingredients.yaml` selects the LTX 2.5 Ingredients IC-LoRA set
-(`ltx25-ingredients-v1.json`): reference sheet + prompt, int8 transformer and
+`WORKFLOWS=senfers1-ingredients.yaml` selects the LTX 2.5 Ingredients IC-LoRA set
+(`senfers1-ingredients-v1.json`): reference sheet + prompt, int8 transformer and
 text encoder plus the root-level LoRA from
 `Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients`. An `hf.file` may sit in a
 different folder than `path`'s category (here the repo root vs `loras/`) as
 long as both end in the same model name; see `docs/cloudrun.md`.
 
-`WORKFLOWS=ltx25-motion.yaml` selects LTX 2.5 motion transfer
-(`ltx25-motion-v1.json`): driving video + start image + prompt. DWPose pose frames
+`WORKFLOWS=senfers1-motion.yaml` selects LTX 2.5 motion transfer
+(`senfers1-motion-v1.json`): driving video + start image + prompt. DWPose pose frames
 guide the Union Control IC-LoRA on the int8 transformer. It needs the
 `comfyui_controlnet_aux` custom node in the image
-(`CUSTOM_NODE_MANIFESTS=ltx25.yaml,ltx25-motion.yaml`). That node's
+(`CUSTOM_NODE_MANIFESTS=senfers1.yaml,senfers1-motion.yaml`). That node's
 `pip:` list replaces its requirements.txt. The `annotators/` models are linked
 for controlnet_aux at boot; see `docs/cloudrun.md`.
 
-`WORKFLOWS=ltx25-upscale.yaml` selects the LTX 2.5 1080p -> ~4K (3840x2176) video upscale
+`WORKFLOWS=senfers1-upscale.yaml` selects the LTX 2.5 1080p -> ~4K (3840x2176) video upscale
 with the Refine-Details IC-LoRA on the int8 transformer: path A
-(`ltx25-upscale-a-v1.json`, official TiledFusion V2V Upscale, 8 steps from noise) and path B
-(`ltx25-upscale-b-v1.json`, Native 4K stage 2 on our clip: VAE encode, latent x2, 3 steps).
+(`senfers1-upscale-a-v1.json`, official TiledFusion V2V Upscale, 8 steps from noise) and path B
+(`senfers1-upscale-b-v1.json`, Native 4K stage 2 on our clip: VAE encode, latent x2, 3 steps).
 Input `source.mp4` (url only). Run this set alone (RAM). Requests must send
 `limits.no_progress_sec` of about 900 and the service needs `JOB_DEADLINE_CEILING_SEC` >= 3600.
 Manifest `limits` are merged last-wins across selected sets, so combining this set with

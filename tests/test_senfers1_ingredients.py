@@ -17,7 +17,7 @@ from senai_errors import WorkerError
 import workflow_models as models
 
 WORKFLOW_DIR = ROOT / 'workflow'
-GRAPH = json.loads((WORKFLOW_DIR / 'ltx25-ingredients-v1.json').read_text())
+GRAPH = json.loads((WORKFLOW_DIR / 'senfers1-ingredients-v1.json').read_text())
 LORA = 'ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors'
 LORA_REPO = 'Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients'
 LORA_REV = '12040e4091ac2008d3906a594e31a7fb1ab9d546'
@@ -58,7 +58,7 @@ def verify(tmp_path, monkeypatch, selection, hf_cache_root):
 # --- manifest ---------------------------------------------------------------
 
 def test_manifest_declares_int8_models_and_root_level_lora(tmp_path):
-    manifests = models.load_manifests('ltx25-ingredients.yaml', WORKFLOW_DIR, tmp_path)
+    manifests = models.load_manifests('senfers1-ingredients.yaml', WORKFLOW_DIR, tmp_path)
     paths = sorted(item['path'] for item in manifests.plan.values())
     assert paths == [
         'diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
@@ -73,9 +73,9 @@ def test_manifest_declares_int8_models_and_root_level_lora(tmp_path):
     assert lora['url'] == f'https://huggingface.co/{LORA_REPO}/resolve/{LORA_REV}/{LORA}'
     assert lora['bytes'] == 1308787472
     assert manifests.custom_nodes == ['ComfyUI-LTXVideo']
-    ltx25 = yaml.safe_load((WORKFLOW_DIR / 'ltx25.yaml').read_text())
-    ingredients = yaml.safe_load((WORKFLOW_DIR / 'ltx25-ingredients.yaml').read_text())
-    assert ingredients['custom_nodes'] == ltx25['custom_nodes']
+    senfers1 = yaml.safe_load((WORKFLOW_DIR / 'senfers1.yaml').read_text())
+    ingredients = yaml.safe_load((WORKFLOW_DIR / 'senfers1-ingredients.yaml').read_text())
+    assert ingredients['custom_nodes'] == senfers1['custom_nodes']
 
 
 def test_graph_avoids_forbidden_nodes_and_bf16_transformer():
@@ -113,8 +113,8 @@ def test_reference_path_matches_upstream_example():
     assert prompt.startswith('Reference sheet: ') and '\n\nGenerated video: ' in prompt
 
 
-def test_combined_with_ltx25_shares_models_without_conflict(tmp_path):
-    manifests = models.load_manifests('ltx25.yaml,ltx25-ingredients.yaml', WORKFLOW_DIR, tmp_path)
+def test_combined_with_senfers1_shares_models_without_conflict(tmp_path):
+    manifests = models.load_manifests('senfers1.yaml,senfers1-ingredients.yaml', WORKFLOW_DIR, tmp_path)
     assert len(manifests.plan) == 7
     assert LORA in manifests.declared_model_names
 
@@ -149,7 +149,7 @@ def comfy_search_paths(config):
     return result
 
 
-@pytest.mark.parametrize('selection', ['ltx25-ingredients.yaml', 'ltx25.yaml,ltx25-ingredients.yaml'])
+@pytest.mark.parametrize('selection', ['senfers1-ingredients.yaml', 'senfers1.yaml,senfers1-ingredients.yaml'])
 def test_verify_ready_and_lora_visible_under_loras(tmp_path, monkeypatch, selection):
     hf_cache_root = tmp_path / 'hf-cache'
     plan = sparse_cache(hf_cache_root, selection, tmp_path / 'comfy-models')
@@ -166,10 +166,10 @@ def test_verify_ready_and_lora_visible_under_loras(tmp_path, monkeypatch, select
     assert str(lora_snapshot) in search['loras']
 
 
-def test_existing_ltx25_paths_unchanged(tmp_path, monkeypatch):
+def test_existing_senfers1_paths_unchanged(tmp_path, monkeypatch):
     hf_cache_root = tmp_path / 'hf-cache'
-    sparse_cache(hf_cache_root, 'ltx25.yaml', tmp_path / 'comfy-models')
-    verify(tmp_path, monkeypatch, 'ltx25.yaml', hf_cache_root)
+    sparse_cache(hf_cache_root, 'senfers1.yaml', tmp_path / 'comfy-models')
+    verify(tmp_path, monkeypatch, 'senfers1.yaml', hf_cache_root)
     config = yaml.safe_load((tmp_path / 'paths.yaml').read_text())
     section = config['hf_lightricks_ltx_2_5']
     assert section['diffusion_models'] == 'diffusion_models/'
@@ -180,8 +180,8 @@ def test_existing_ltx25_paths_unchanged(tmp_path, monkeypatch):
 
 def booted_state(tmp_path, monkeypatch):
     hf_cache_root = tmp_path / 'hf-cache'
-    sparse_cache(hf_cache_root, 'ltx25-ingredients.yaml', tmp_path / 'comfy-models')
-    state = verify(tmp_path, monkeypatch, 'ltx25-ingredients.yaml', hf_cache_root)
+    sparse_cache(hf_cache_root, 'senfers1-ingredients.yaml', tmp_path / 'comfy-models')
+    state = verify(tmp_path, monkeypatch, 'senfers1-ingredients.yaml', hf_cache_root)
     return frozenset(state['allowed_class_types']), frozenset(state['declared_model_names'])
 
 
@@ -193,7 +193,7 @@ def test_graph_passes_guard(tmp_path, monkeypatch):
         'workflow': GRAPH,
         'inputs': [{'name': 'reference.png', 'media_type': 'image/png', 'url': 'https://example.com/r.png'}],
         'trace': {'generation_id': 'g', 'attempt': 1, 'binding_alias': 'b', 'binding_revision': 'r',
-                  'adapter': 'a', 'workflow_id': 'ltx25-ingredients-v1', 'graph_sha256': '0' * 64},
+                  'adapter': 'a', 'workflow_id': 'senfers1-ingredients-v1', 'graph_sha256': '0' * 64},
         'limits': {'deadline_at': (now + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')},
     }, now=now)
     guard.check_allowlist(envelope.workflow, allowed)
@@ -217,7 +217,7 @@ def test_guard_rejects_q8_loader_and_bf16_transformer(tmp_path, monkeypatch):
 
 def test_ingredients_only_set_rejects_i2v_enhancer_graph(tmp_path, monkeypatch):
     allowed, _ = booted_state(tmp_path, monkeypatch)
-    i2v = json.loads((WORKFLOW_DIR / 'ltx25-i2v-v1.json').read_text())
+    i2v = json.loads((WORKFLOW_DIR / 'senfers1-i2v-v1.json').read_text())
     with pytest.raises(WorkerError) as exc:
         guard.check_allowlist(i2v, allowed)
     assert exc.value.code == 'NODE_NOT_ALLOWED'
@@ -227,10 +227,10 @@ def test_ingredients_only_set_rejects_i2v_enhancer_graph(tmp_path, monkeypatch):
 
 def test_stage_files_lists_only_selected_set(tmp_path):
     hf_cache_root = tmp_path / 'hf-cache'
-    sparse_cache(hf_cache_root, 'ltx25.yaml,ltx25-ingredients.yaml', tmp_path / 'm')
-    plan = models.load_plan('ltx25-ingredients.yaml', WORKFLOW_DIR, tmp_path / 'm')
+    sparse_cache(hf_cache_root, 'senfers1.yaml,senfers1-ingredients.yaml', tmp_path / 'm')
+    plan = models.load_plan('senfers1-ingredients.yaml', WORKFLOW_DIR, tmp_path / 'm')
     assert models.stage_files(plan, hf_cache_root) == INGREDIENTS_FILES
-    full = models.load_plan('ltx25.yaml,ltx25-ingredients.yaml', WORKFLOW_DIR, tmp_path / 'm')
+    full = models.load_plan('senfers1.yaml,senfers1-ingredients.yaml', WORKFLOW_DIR, tmp_path / 'm')
     assert len(models.stage_files(full, hf_cache_root)) == 7
 
 
@@ -258,8 +258,8 @@ def stage_list_cli(env):
 
 def test_stage_list_cli(tmp_path):
     hf_cache_root = tmp_path / 'hf-cache'
-    sparse_cache(hf_cache_root, 'ltx25-ingredients.yaml', tmp_path / 'm')
-    env = {'WORKFLOWS': 'ltx25-ingredients.yaml', 'WORKFLOW_DIR': str(WORKFLOW_DIR),
+    sparse_cache(hf_cache_root, 'senfers1-ingredients.yaml', tmp_path / 'm')
+    env = {'WORKFLOWS': 'senfers1-ingredients.yaml', 'WORKFLOW_DIR': str(WORKFLOW_DIR),
            'HF_CACHE_ROOT': str(hf_cache_root), 'COMFY_MODEL_ROOT': str(tmp_path / 'm')}
     result = stage_list_cli(env)
     assert result.returncode == 0, result.stderr
@@ -296,7 +296,7 @@ def run_start_staging(tmp_path, workflows):
     (bin_dir / 'python3').symlink_to(fake)
     hf_cache_root = tmp_path / 'bucket' / 'hub'
     # The bucket holds both sets plus an unrelated repo; tiny files keep the copy fast.
-    plan = models.load_plan('ltx25.yaml,ltx25-ingredients.yaml', WORKFLOW_DIR, tmp_path / 'm')
+    plan = models.load_plan('senfers1.yaml,senfers1-ingredients.yaml', WORKFLOW_DIR, tmp_path / 'm')
     for item in plan.values():
         hf = item['hf']
         org, name = hf['repo'].split('/', 1)
@@ -324,7 +324,7 @@ def run_start_staging(tmp_path, workflows):
 
 
 def test_start_stages_only_selected_set(tmp_path):
-    proc, staged, verify_root = run_start_staging(tmp_path, 'ltx25-ingredients.yaml')
+    proc, staged, verify_root = run_start_staging(tmp_path, 'senfers1-ingredients.yaml')
     assert 'staging 5 manifest files' in proc.stdout, proc.stdout + proc.stderr
     assert staged == INGREDIENTS_FILES
     assert verify_root == str(tmp_path / 'stage' / 'hub')

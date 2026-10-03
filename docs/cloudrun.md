@@ -7,7 +7,7 @@ approval (one approval per call, per project rules).
 ## What this is
 
 The same `senai-worker/1` handler (`handler.py::handler`) and the same image
-(`Dockerfile.ltx25`) run as a Google Cloud Run GPU **service** instead of a
+(`Dockerfile.senfers1`) run as a Google Cloud Run GPU **service** instead of a
 RunPod serverless worker. Only the transport differs:
 
 - RunPod mode (`SENAI_TRANSPORT=runpod`, default): `start.sh` launches
@@ -65,7 +65,7 @@ ffmpeg -i <saved> -map 0:v:0 -map 0:a? -c:v libx264 -preset slow -crf <N> -pix_f
   around 8–10) in the graph.
 - An unsupported value or an ffmpeg failure/timeout (900 s) fails the job with
   `INTERNAL`; there is no silent fallback to the untranscoded file.
-- `ffmpeg` is already in both images (`Dockerfile`, `Dockerfile.ltx25` apt
+- `ffmpeg` is already in both images (`Dockerfile`, `Dockerfile.senfers1` apt
   install); no new dependency.
 
 ## HTTP surface
@@ -112,7 +112,7 @@ gcloud run deploy worker-comfyui \
   --no-cpu-throttling \
   --timeout 3600 \
   --service-account worker-comfyui@senfers.iam.gserviceaccount.com \
-  --set-env-vars SENAI_TRANSPORT=cloudrun,MODEL_DOWNLOAD_POLICY=cache-only,HF_CACHE_ROOT=/models/hub,WORKFLOWS=ltx25.yaml \
+  --set-env-vars SENAI_TRANSPORT=cloudrun,MODEL_DOWNLOAD_POLICY=cache-only,HF_CACHE_ROOT=/models/hub,WORKFLOWS=senfers1.yaml \
   --add-volume name=models,type=cloud-storage,bucket=senfers-models-usc1,readonly=true \
   --add-volume-mount volume=models,mount-path=/models \
   --startup-probe httpGet.path=/ready,httpGet.port=8080,initialDelaySeconds=0,periodSeconds=10,failureThreshold=180,timeoutSeconds=5
@@ -205,7 +205,7 @@ gcloud run jobs create worker-comfyui-job \
   --subnet default \
   --vpc-egress all-traffic \
   --service-account worker-comfyui@senfers.iam.gserviceaccount.com \
-  --set-env-vars SENAI_TRANSPORT=cloudrun-job,MODEL_DOWNLOAD_POLICY=cache-only,HF_CACHE_ROOT=/models/hub,WORKFLOWS=ltx25.yaml \
+  --set-env-vars SENAI_TRANSPORT=cloudrun-job,MODEL_DOWNLOAD_POLICY=cache-only,HF_CACHE_ROOT=/models/hub,WORKFLOWS=senfers1.yaml \
   --add-volume name=models,type=cloud-storage,bucket=senfers-models-usc1,readonly=true \
   --add-volume-mount volume=models,mount-path=/models \
   --add-volume name=queue,type=cloud-storage,bucket=senfers-jobs-usc1,mount-options=metadata-cache-ttl-secs=0 \
@@ -235,22 +235,22 @@ stage. The bucket can therefore hold more sets than fit in the 80 GiB RAM cap.
 If the list can't be produced (unreadable manifest, no listed file found), it
 falls back to copying all of `$HF_CACHE_ROOT`, the earlier behaviour.
 
-## LTX 2.5 Ingredients set (`ltx25-ingredients.yaml`)
+## LTX 2.5 Ingredients set (`senfers1-ingredients.yaml`)
 
 A reference sheet plus a prompt produces a video that keeps the sheet's
 character, product and location. It uses the IC-LoRA
 `Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients@12040e40…`
 (`ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors`, 1,308,787,472 bytes, at the
 repo root) on top of the **int8** transformer and int8 Gemma 12B encoder. The
-bf16 transformer is never used. Graph: `workflow/ltx25-ingredients-v1.json`
+bf16 transformer is never used. Graph: `workflow/senfers1-ingredients-v1.json`
 (single stage, 8 distilled steps, cfg 1, no prompt enhancer, no upscaler, no
 `GemmaAPITextEncode`).
 
 Select it with:
 
-- `WORKFLOWS=ltx25-ingredients.yaml`: stages 5 files, 40,022,880,956 bytes
+- `WORKFLOWS=senfers1-ingredients.yaml`: stages 5 files, 40,022,880,956 bytes
   (int8 transformer, int8 Gemma 12B, video VAE, audio VAE, LoRA).
-- `WORKFLOWS=ltx25.yaml,ltx25-ingredients.yaml`: both sets on one worker
+- `WORKFLOWS=senfers1.yaml,senfers1-ingredients.yaml`: both sets on one worker
   (7 files). A warm worker that alternates between i2v and Ingredients re-patches
   the LoRA on each switch, so a separate service for Ingredients is cheaper.
 
@@ -290,11 +290,11 @@ for the whole clip, with the person animated inside her panel. The LoRA was
 active; the sheet looked like a video frame rather than a reference sheet. Cut
 each element out onto black and add a location panel before blaming the graph.
 
-## LTX 2.5 motion transfer set (`ltx25-motion.yaml`)
+## LTX 2.5 motion transfer set (`senfers1-motion.yaml`)
 
 A driving video supplies the motion, a start image supplies the person: the
 output is the start-image person doing the driving video's motion ("Match &
-Move"). Graph `workflow/ltx25-motion-v1.json`, from the pose branch of the
+Move"). Graph `workflow/senfers1-motion-v1.json`, from the pose branch of the
 upstream `LTX-2.5_ICLoRA_Union_Control_Distilled.json`:
 
 `LoadVideo driving.mp4` → `Video Slice` (decode only `length/fps` seconds) →
@@ -309,8 +309,8 @@ first frame through `LTXVImgToVideoInplace` (strength 1). One distilled stage,
 8 steps, cfg 1, generated audio, `SaveVideo`. No bf16 transformer, no
 `GemmaAPITextEncode`, no enhancer, no upscaler, no onnxruntime.
 
-Select it with `WORKFLOWS=ltx25-motion.yaml` (or add it to a list, e.g.
-`WORKFLOWS=ltx25.yaml,ltx25-motion.yaml`). Alone it stages 7 files,
+Select it with `WORKFLOWS=senfers1-motion.yaml` (or add it to a list, e.g.
+`WORKFLOWS=senfers1.yaml,senfers1-motion.yaml`). Alone it stages 7 files,
 39,721,315,609 bytes: int8 transformer, int8 Gemma 12B, video VAE, audio VAE,
 the Union Control LoRA, `hr16/DWPose-TorchScript-BatchSize5@359d662a…/dw-ll_ucoco_384_bs5.torchscript.pt`
 and `hr16/yolox-onnx@a124b32c…/yolox_l.torchscript.pt`, all at their repo roots
@@ -319,9 +319,9 @@ in the bucket's `hub/models--<org>--<name>/snapshots/<rev>/` layout.
 ### Image requirement
 
 The set needs the `comfyui_controlnet_aux` custom node
-(`Fannovel16/comfyui_controlnet_aux@0cd29047…`) in the image. `Dockerfile.ltx25`
-still defaults to `CUSTOM_NODE_MANIFESTS="ltx25.yaml"`, so build with
-`--build-arg CUSTOM_NODE_MANIFESTS=ltx25.yaml,ltx25-motion.yaml`. The manifest's
+(`Fannovel16/comfyui_controlnet_aux@0cd29047…`) in the image. `Dockerfile.senfers1`
+still defaults to `CUSTOM_NODE_MANIFESTS="senfers1.yaml"`, so build with
+`--build-arg CUSTOM_NODE_MANIFESTS=senfers1.yaml,senfers1-motion.yaml`. The manifest's
 `pip:` list replaces the pack's `requirements.txt`, so the build installs only
 `opencv-python-headless>=4.7.0.72,<5`, `matplotlib` and `scikit-image` (plus
 their dependencies), not `onnxruntime-gpu`, `mediapipe`, `opencv-contrib-python`

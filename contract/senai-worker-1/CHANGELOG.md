@@ -1,5 +1,20 @@
 # Changelog — kontrak runpod-senai-worker
 
+## 0.4.0 — 2026-10-03
+
+Rename only, wire format unchanged: self-hosted LTX 2.5 is "Senfers 1.0" everywhere senai
+owns the name (user decision 2026-10-03). Higgsfield `ltx-2.5-fast`/`ltx-2.5-pro` and vavo's
+`runpod-ltx25` contract are untouched.
+
+- adapters: `ltx25_senai_worker_v1` -> `senfers1_senai_worker_v1`.
+- sets/manifests: `ltx25.yaml` -> `senfers1.yaml`.
+- workflow ids/paths: `ltx25-{t2v,i2v,flf}-v1` -> `senfers1-{t2v,i2v,flf}-v1`, paths under
+  `backend/src/senai/modules/providers/runpod/workflows/` renamed to match.
+- `sha256_canonical` for the three renamed workflows is **unverified** pending recompute: the
+  graphs' `SaveVideo.filename_prefix` also moved from `video/LTX-2.5_*` to `video/Senfers1_*`,
+  which changes the canonical bytes. Recompute against the real senai-side graphs once that
+  rename lands there, in the same change that fills in `pins.yaml`.
+
 ## 0.3.0 — 2026-09-24
 
 Tambahan opsional (minor), dari G8 yang diputus RunPod pada 605 s tanpa diagnosis:

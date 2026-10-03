@@ -17,10 +17,10 @@ import guard
 from senai_errors import WorkerError
 import workflow_models as models
 
-from tests.test_ltx25_ingredients import STAGING_FAKE_PYTHON, comfy_search_paths, sparse_cache, verify
+from tests.test_senfers1_ingredients import STAGING_FAKE_PYTHON, comfy_search_paths, sparse_cache, verify
 
 WORKFLOW_DIR = ROOT / 'workflow'
-GRAPH = json.loads((WORKFLOW_DIR / 'ltx25-motion-v1.json').read_text())
+GRAPH = json.loads((WORKFLOW_DIR / 'senfers1-motion-v1.json').read_text())
 LTX_REV = '5e6e71018ee1756ed329b697a7b4aedc934dfce9'
 LORA = 'ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors'
 LORA_REPO = 'Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control'
@@ -44,7 +44,7 @@ MP4_HEAD = b'\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41'
 # --- manifest + graph ---------------------------------------------------------
 
 def test_manifest_declares_int8_models_lora_and_annotators(tmp_path):
-    manifests = models.load_manifests('ltx25-motion.yaml', WORKFLOW_DIR, tmp_path)
+    manifests = models.load_manifests('senfers1-motion.yaml', WORKFLOW_DIR, tmp_path)
     paths = sorted(item['path'] for item in manifests.plan.values())
     assert paths == [
         f'annotators/{POSE[2]}',
@@ -62,9 +62,9 @@ def test_manifest_declares_int8_models_lora_and_annotators(tmp_path):
     assert by_file[POSE[2]] == dict(zip(('repo', 'revision', 'file'), POSE))
     assert by_file[BBOX[2]] == dict(zip(('repo', 'revision', 'file'), BBOX))
     assert manifests.custom_nodes == ['ComfyUI-LTXVideo', 'comfyui_controlnet_aux']
-    doc = yaml.safe_load((WORKFLOW_DIR / 'ltx25-motion.yaml').read_text())
-    ltx25 = yaml.safe_load((WORKFLOW_DIR / 'ltx25.yaml').read_text())
-    assert doc['custom_nodes'][0] == ltx25['custom_nodes'][0]
+    doc = yaml.safe_load((WORKFLOW_DIR / 'senfers1-motion.yaml').read_text())
+    senfers1 = yaml.safe_load((WORKFLOW_DIR / 'senfers1.yaml').read_text())
+    assert doc['custom_nodes'][0] == senfers1['custom_nodes'][0]
     aux = doc['custom_nodes'][1]
     assert aux['revision'] == CNAUX_REV
     assert not any(s.startswith(('onnxruntime', 'mediapipe', 'opencv-contrib')) for s in aux['pip'])
@@ -94,7 +94,7 @@ def test_graph_shape_and_forbidden_nodes():
 
 
 def test_combined_with_other_ltx_sets(tmp_path):
-    manifests = models.load_manifests('ltx25.yaml,ltx25-ingredients.yaml,ltx25-motion.yaml', WORKFLOW_DIR, tmp_path)
+    manifests = models.load_manifests('senfers1.yaml,senfers1-ingredients.yaml,senfers1-motion.yaml', WORKFLOW_DIR, tmp_path)
     assert len(manifests.plan) == 10
     assert manifests.custom_nodes.count('ComfyUI-LTXVideo') == 3
 
@@ -105,8 +105,8 @@ def test_verify_ready_and_links_annotators(tmp_path, monkeypatch):
     hf_cache_root = tmp_path / 'hf-cache'
     aux = tmp_path / 'aux'
     monkeypatch.setenv('AUX_ANNOTATOR_CKPTS_PATH', str(aux))
-    plan = sparse_cache(hf_cache_root, 'ltx25-motion.yaml', tmp_path / 'comfy-models')
-    state = verify(tmp_path, monkeypatch, 'ltx25-motion.yaml', hf_cache_root)
+    plan = sparse_cache(hf_cache_root, 'senfers1-motion.yaml', tmp_path / 'comfy-models')
+    state = verify(tmp_path, monkeypatch, 'senfers1-motion.yaml', hf_cache_root)
     assert state['ready'] is True, state
     assert state['models']['present'] == len(plan) == 7
     assert state['custom_nodes'] == ['ComfyUI-LTXVideo', 'comfyui_controlnet_aux']
@@ -125,18 +125,18 @@ def test_verify_relinks_on_reboot_and_reports_missing_annotator(tmp_path, monkey
     hf_cache_root = tmp_path / 'hf-cache'
     aux = tmp_path / 'aux'
     monkeypatch.setenv('AUX_ANNOTATOR_CKPTS_PATH', str(aux))
-    sparse_cache(hf_cache_root, 'ltx25-motion.yaml', tmp_path / 'comfy-models')
-    verify(tmp_path, monkeypatch, 'ltx25-motion.yaml', hf_cache_root)
-    assert verify(tmp_path, monkeypatch, 'ltx25-motion.yaml', hf_cache_root)['ready'] is True
+    sparse_cache(hf_cache_root, 'senfers1-motion.yaml', tmp_path / 'comfy-models')
+    verify(tmp_path, monkeypatch, 'senfers1-motion.yaml', hf_cache_root)
+    assert verify(tmp_path, monkeypatch, 'senfers1-motion.yaml', hf_cache_root)['ready'] is True
     org, name = BBOX[0].split('/')
     (hf_cache_root / f'models--{org}--{name}' / 'snapshots' / BBOX[1] / BBOX[2]).unlink()
-    state = verify(tmp_path, monkeypatch, 'ltx25-motion.yaml', hf_cache_root)
+    state = verify(tmp_path, monkeypatch, 'senfers1-motion.yaml', hf_cache_root)
     assert state['ready'] is False
     assert state['models']['missing'] == [f'annotators/{BBOX[2]}']
 
 
 def test_link_annotators_ignores_other_categories(tmp_path):
-    plan = models.load_plan('ltx25-ingredients.yaml', WORKFLOW_DIR, tmp_path / 'm')
+    plan = models.load_plan('senfers1-ingredients.yaml', WORKFLOW_DIR, tmp_path / 'm')
     assert models.link_annotators(plan, tmp_path / 'hf', tmp_path / 'm', tmp_path / 'aux') == []
     assert not (tmp_path / 'aux').exists()
 
@@ -146,8 +146,8 @@ def test_link_annotators_ignores_other_categories(tmp_path):
 def booted_state(tmp_path, monkeypatch):
     hf_cache_root = tmp_path / 'hf-cache'
     monkeypatch.setenv('AUX_ANNOTATOR_CKPTS_PATH', str(tmp_path / 'aux'))
-    sparse_cache(hf_cache_root, 'ltx25-motion.yaml', tmp_path / 'comfy-models')
-    state = verify(tmp_path, monkeypatch, 'ltx25-motion.yaml', hf_cache_root)
+    sparse_cache(hf_cache_root, 'senfers1-motion.yaml', tmp_path / 'comfy-models')
+    state = verify(tmp_path, monkeypatch, 'senfers1-motion.yaml', hf_cache_root)
     return frozenset(state['allowed_class_types']), frozenset(state['declared_model_names'])
 
 
@@ -164,7 +164,7 @@ def envelope():
             {'name': 'start.png', 'media_type': 'image/png', 'url': f'https://{R2}/b/start.png'},
         ],
         'trace': {'generation_id': 'g', 'attempt': 1, 'binding_alias': 'b', 'binding_revision': 'r',
-                  'adapter': 'a', 'workflow_id': 'ltx25-motion-v1', 'graph_sha256': '0' * 64},
+                  'adapter': 'a', 'workflow_id': 'senfers1-motion-v1', 'graph_sha256': '0' * 64},
         'limits': {'deadline_at': (now + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')},
     }, now=now)
 
@@ -266,7 +266,7 @@ def test_installer_uses_pip_list_instead_of_requirements(tmp_path, monkeypatch):
     monkeypatch.setattr(installer.subprocess, 'run', fake_run)
     monkeypatch.setenv('WORKFLOW_DIR', str(WORKFLOW_DIR))
     monkeypatch.setenv('COMFY_ROOT', str(comfy))
-    installed = installer.main(['--manifests', 'ltx25.yaml,ltx25-motion.yaml'])
+    installed = installer.main(['--manifests', 'senfers1.yaml,senfers1-motion.yaml'])
     assert sorted(installed) == ['ComfyUI-LTXVideo', 'comfyui_controlnet_aux']
     pip_calls = [c for c in calls if c[:3] == ['uv', 'pip', 'install']]
     assert pip_calls == [
@@ -286,10 +286,10 @@ def test_installer_rejects_unsafe_pip_specs(specs):
 
 def test_stage_files_lists_motion_set(tmp_path):
     hf_cache_root = tmp_path / 'hf-cache'
-    sparse_cache(hf_cache_root, 'ltx25.yaml,ltx25-ingredients.yaml,ltx25-motion.yaml', tmp_path / 'm')
-    plan = models.load_plan('ltx25-motion.yaml', WORKFLOW_DIR, tmp_path / 'm')
+    sparse_cache(hf_cache_root, 'senfers1.yaml,senfers1-ingredients.yaml,senfers1-motion.yaml', tmp_path / 'm')
+    plan = models.load_plan('senfers1-motion.yaml', WORKFLOW_DIR, tmp_path / 'm')
     assert models.stage_files(plan, hf_cache_root) == MOTION_FILES
-    env = {**os.environ, 'WORKFLOWS': 'ltx25-motion.yaml', 'WORKFLOW_DIR': str(WORKFLOW_DIR),
+    env = {**os.environ, 'WORKFLOWS': 'senfers1-motion.yaml', 'WORKFLOW_DIR': str(WORKFLOW_DIR),
            'HF_CACHE_ROOT': str(hf_cache_root), 'COMFY_MODEL_ROOT': str(tmp_path / 'm')}
     result = subprocess.run([sys.executable, str(ROOT / 'src/workflow_models.py'), '--stage-list'],
                             env=env, capture_output=True, text=True)
@@ -309,7 +309,7 @@ def test_start_stages_motion_set_and_exports_aux_path(tmp_path):
     fake.chmod(0o755)
     (bin_dir / 'python3').symlink_to(fake)
     hf_cache_root = tmp_path / 'bucket' / 'hub'
-    plan = models.load_plan('ltx25.yaml,ltx25-ingredients.yaml,ltx25-motion.yaml', WORKFLOW_DIR, tmp_path / 'm')
+    plan = models.load_plan('senfers1.yaml,senfers1-ingredients.yaml,senfers1-motion.yaml', WORKFLOW_DIR, tmp_path / 'm')
     for item in plan.values():
         hf = item['hf']
         org, name = hf['repo'].split('/', 1)
@@ -321,7 +321,7 @@ def test_start_stages_motion_set_and_exports_aux_path(tmp_path):
     env.update({
         'PATH': str(bin_dir) + ':' + os.environ['PATH'], 'TEST_ROOT': str(tmp_path),
         'REAL_PYTHON': sys.executable, 'REAL_WORKFLOW_MODELS': str(ROOT / 'src/workflow_models.py'),
-        'PUBLIC_KEY': '', 'SENAI_TRANSPORT': 'cloudrun', 'WORKFLOWS': 'ltx25-motion.yaml',
+        'PUBLIC_KEY': '', 'SENAI_TRANSPORT': 'cloudrun', 'WORKFLOWS': 'senfers1-motion.yaml',
         'WORKFLOW_DIR': str(WORKFLOW_DIR), 'COMFY_MODEL_ROOT': str(tmp_path / 'm'),
         'HF_CACHE_ROOT': str(hf_cache_root), 'SENAI_HF_STAGE_DIR': str(stage_dir),
         'COMFY_PID_FILE': str(tmp_path / 'comfyui.pid'), 'SENAI_BOOT_TIMELINE': str(tmp_path / 'timeline'),

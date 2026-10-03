@@ -128,7 +128,7 @@ MiniMax's editor JSON already contains `properties.models` with names, URLs and
 model directories. The generic loader reads these (also inside subgraphs).
 `minimax-h3.yaml` references that JSON without duplicating its model catalog.
 This selects five MiniMax assets and no LTX weights. For API JSONs without model
-metadata, use explicit model entries as in `ltx25.yaml`:
+metadata, use explicit model entries as in `senfers1.yaml`:
 
 ```yaml
 version: 1
@@ -189,7 +189,7 @@ custom_nodes:
     revision: ac4d99839020b983e956a8ab67ec38aec1b6e65a
 ```
 
-Build with `--build-arg CUSTOM_NODE_MANIFESTS=ltx25.yaml` to include those selected
+Build with `--build-arg CUSTOM_NODE_MANIFESTS=senfers1.yaml` to include those selected
 dependencies. This does not select runtime workflows or download weights.
 A model/graph change needs no rebuild when using a mounted `WORKFLOW_DIR`; new
 Python/custom-node dependencies do require a compatible image. Manager stays offline.

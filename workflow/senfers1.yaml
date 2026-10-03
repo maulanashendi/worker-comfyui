@@ -1,17 +1,15 @@
-# LTX 2.5 "Ingredients" IC-LoRA (reference sheet + prompt -> video), int8 only.
-# Graph derived from Lightricks/ComfyUI-LTXVideo@5722b53 example_workflows/2.5/
-# LTX-2.5_ICLoRA_Ingredients_Single_Stage_Distilled.json, with our int8 transformer and
-# int8 Gemma 12B in place of the bf16 files, no API text encoder, no prompt enhancer and
-# no upscale stage. Never swap in the bf16 transformer here.
+# Source: Senai workflows; upstream vavo/LTX2.5-serverless@5e6a88f.
 version: 2
-set: ltx25-ingredients
+set: senfers1
 requires_comfyui: '>=0.38.0'
 custom_nodes:
 - name: ComfyUI-LTXVideo
   repo: https://github.com/Lightricks/ComfyUI-LTXVideo.git
   revision: 5722b53a08daec57f5442347b235cb84df0afbe7
 workflows:
-- ltx25-ingredients-v1.json
+- senfers1-t2v-v1.json
+- senfers1-i2v-v1.json
+- senfers1-flf-v1.json
 allowed_class_types_extra: []
 limits:
   no_progress_sec: 120
@@ -19,6 +17,13 @@ limits:
   execution_ceiling_sec: 1800
 warmup_graph: null
 models:
+- path: text_encoders/gemma4_e2b_it_bf16.safetensors
+  hf:
+    repo: Comfy-Org/gemma-4
+    revision: 63d0f7c476756b88910170c1df75e2384ea1af31
+    file: text_encoders/gemma4_e2b_it_bf16.safetensors
+  sha256: dcc3c8d27be2db2ef38b78d564ebfa1e92eb24665ed2751f2983275f03a067c8
+  bytes: 10278774160
 - path: diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
   hf:
     repo: Lightricks/LTX-2.5
@@ -47,12 +52,10 @@ models:
     file: text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
   sha256: 6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f
   bytes: 15372969374
-# The LoRA sits at the repo root; `path` still files it under ComfyUI's `loras`
-# category (workflow_models.hf_category_dir maps the snapshot root to `loras`).
-- path: loras/ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors
+- path: latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors
   hf:
-    repo: Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients
-    revision: 12040e4091ac2008d3906a594e31a7fb1ab9d546
-    file: ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors
-  sha256: ff873a5beada3c579a8137c7c53343916f78bcc9a529ba910143073fe8715e95
-  bytes: 1308787472
+    repo: Lightricks/LTX-2.5
+    revision: 5e6e71018ee1756ed329b697a7b4aedc934dfce9
+    file: latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors
+  sha256: eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8
+  bytes: 995778752

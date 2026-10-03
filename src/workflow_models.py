@@ -17,6 +17,23 @@ import yaml
 
 PROTOCOL = "senai-worker/1"
 
+# Senfers 1.0 rename (2026-10-03): manifest files were renamed ltx25* -> senfers1*.
+# A WORKFLOWS env value naming the old file must keep resolving for one release,
+# so an image deployed before the Cloud Run env var flip doesn't break on redeploy.
+LEGACY_MANIFEST_NAMES = {
+    'ltx25.yaml': 'senfers1.yaml',
+    'ltx25-ingredients.yaml': 'senfers1-ingredients.yaml',
+    'ltx25-motion.yaml': 'senfers1-motion.yaml',
+    'ltx25-upscale.yaml': 'senfers1-upscale.yaml',
+    'ltx25-nvfp4.yaml': 'senfers1-nvfp4.yaml',
+}
+
+
+def resolve_manifest_name(name):
+    """Map a legacy ltx25* manifest name to its senfers1* replacement; unknown or
+    already-current names pass through unchanged."""
+    return LEGACY_MANIFEST_NAMES.get(name, name)
+
 
 def contained(root, relative):
     if not isinstance(relative, str) or not relative or Path(relative).is_absolute():
@@ -139,7 +156,7 @@ def load_manifests(selection, workflow_root, model_root):
     """Parse every manifest/graph named by `selection` (a comma list); never scan the folder."""
     result = ManifestSet()
     for name in selection.split(','):
-        name = name.strip()
+        name = resolve_manifest_name(name.strip())
         document = yaml.safe_load(contained(workflow_root, name).read_text())
         if name.endswith('.json'):
             models, references = graph_assets(document)
@@ -448,7 +465,7 @@ def raw_manifest_sha256(selection, workflow_root):
     manifest_sha256 must never be null, even when the manifest fails to parse)."""
     digest = hashlib.sha256()
     for name in selection.split(','):
-        name = name.strip()
+        name = resolve_manifest_name(name.strip())
         try:
             data = contained(workflow_root, name).read_bytes()
         except (OSError, ValueError):

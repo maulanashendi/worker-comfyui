@@ -49,9 +49,29 @@ def write_manifest_snapshots(hf_cache_root, plan):
 
 
 def test_senai_all_modes_six_models(tmp_path):
-    plan = models.load_plan('ltx25.yaml', ROOT / 'workflow', tmp_path)
+    plan = models.load_plan('senfers1.yaml', ROOT / 'workflow', tmp_path)
     assert len(plan) == 6
     assert {p.parent.name for p in plan} == {'diffusion_models', 'text_encoders', 'vae', 'latent_upscale_models'}
+
+
+def test_legacy_ltx25_manifest_names_resolve_to_senfers1(tmp_path):
+    # Senfers 1.0 rename (2026-10-03): an image deployed with the old env value
+    # (WORKFLOWS=ltx25.yaml) must keep booting after the manifest files themselves
+    # were renamed, until the Cloud Run env var is flipped in a later release.
+    legacy = {
+        'ltx25.yaml': 'senfers1.yaml',
+        'ltx25-ingredients.yaml': 'senfers1-ingredients.yaml',
+        'ltx25-motion.yaml': 'senfers1-motion.yaml',
+        'ltx25-upscale.yaml': 'senfers1-upscale.yaml',
+        'ltx25-nvfp4.yaml': 'senfers1-nvfp4.yaml',
+    }
+    for old_name, new_name in legacy.items():
+        assert models.resolve_manifest_name(old_name) == new_name
+    assert models.resolve_manifest_name('minimax-h3.yaml') == 'minimax-h3.yaml'
+
+    legacy_plan = models.load_plan('ltx25.yaml', ROOT / 'workflow', tmp_path)
+    current_plan = models.load_plan('senfers1.yaml', ROOT / 'workflow', tmp_path)
+    assert legacy_plan == current_plan
 
 
 def test_manifest_missing_model_and_escape(tmp_path):
@@ -99,7 +119,7 @@ def test_failed_download_preserves_existing_and_cleans_partial(tmp_path):
 
 
 def test_check_does_not_download_or_write(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv('WORKFLOW_MANIFESTS', 'ltx25.yaml')
+    monkeypatch.setenv('WORKFLOW_MANIFESTS', 'senfers1.yaml')
     monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
     monkeypatch.setenv('COMFY_MODEL_ROOT', str(tmp_path / 'models'))
     monkeypatch.setattr(sys, 'argv', ['workflow_models.py', '--check'])
@@ -123,7 +143,7 @@ def test_multiple_manifests_deduplicate_and_reject_conflicts(tmp_path):
 
 
 def test_custom_model_root_is_registered_with_comfy(tmp_path, monkeypatch):
-    monkeypatch.setenv('WORKFLOW_MANIFESTS', 'ltx25.yaml')
+    monkeypatch.setenv('WORKFLOW_MANIFESTS', 'senfers1.yaml')
     monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
     monkeypatch.setenv('COMFY_MODEL_ROOT', str(tmp_path / 'persistent-models'))
     monkeypatch.setenv('WORKFLOW_MODEL_PATHS', str(tmp_path / 'paths.yaml'))
@@ -200,10 +220,10 @@ def test_concurrent_workers_download_once(tmp_path):
 def test_verify_ltx_set_ready_with_hf_cache(tmp_path, monkeypatch):
     hf_cache_root = tmp_path / 'hf-cache'
     model_root = tmp_path / 'comfy-models'
-    plan = models.load_plan('ltx25.yaml', ROOT / 'workflow', model_root)
+    plan = models.load_plan('senfers1.yaml', ROOT / 'workflow', model_root)
     write_manifest_snapshots(hf_cache_root, plan)
 
-    monkeypatch.setenv('WORKFLOWS', 'ltx25.yaml')
+    monkeypatch.setenv('WORKFLOWS', 'senfers1.yaml')
     monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
     monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
     monkeypatch.setenv('HF_CACHE_ROOT', str(hf_cache_root))
@@ -404,10 +424,10 @@ def test_missing_policy_lock_timeout_does_not_hang(tmp_path, monkeypatch):
 def test_verify_output_not_configured_without_bucket(tmp_path, monkeypatch):
     hf_cache_root = tmp_path / 'hf-cache'
     model_root = tmp_path / 'comfy-models'
-    plan = models.load_plan('ltx25.yaml', ROOT / 'workflow', model_root)
+    plan = models.load_plan('senfers1.yaml', ROOT / 'workflow', model_root)
     write_manifest_snapshots(hf_cache_root, plan)
 
-    monkeypatch.setenv('WORKFLOWS', 'ltx25.yaml')
+    monkeypatch.setenv('WORKFLOWS', 'senfers1.yaml')
     monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
     monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
     monkeypatch.setenv('HF_CACHE_ROOT', str(hf_cache_root))
@@ -480,7 +500,7 @@ def test_write_paths_matches_verify_without_any_staged_file(tmp_path, monkeypatc
     stage_dir = tmp_path / 'stage-hub'
     model_root = tmp_path / 'comfy-models'
 
-    monkeypatch.setenv('WORKFLOWS', 'ltx25.yaml')
+    monkeypatch.setenv('WORKFLOWS', 'senfers1.yaml')
     monkeypatch.setenv('WORKFLOW_DIR', str(ROOT / 'workflow'))
     monkeypatch.setenv('COMFY_MODEL_ROOT', str(model_root))
     monkeypatch.setenv('HF_CACHE_ROOT', str(stage_dir))
@@ -496,9 +516,9 @@ def test_write_paths_matches_verify_without_any_staged_file(tmp_path, monkeypatc
     assert 'workflow_models' in config
 
     whitelist = capsys.readouterr().out.strip()
-    plan = models.load_plan('ltx25.yaml', ROOT / 'workflow', model_root)
-    manifests = models.load_manifests('ltx25.yaml', ROOT / 'workflow', model_root)
-    assert plan  # sanity: ltx25.yaml actually declares models
+    plan = models.load_plan('senfers1.yaml', ROOT / 'workflow', model_root)
+    manifests = models.load_manifests('senfers1.yaml', ROOT / 'workflow', model_root)
+    assert plan  # sanity: senfers1.yaml actually declares models
     assert whitelist.split() == list(dict.fromkeys(manifests.custom_nodes))
 
 
@@ -547,9 +567,9 @@ def test_ltx_workflow_canonical_sha256_matches_contract_pins():
     pins = yaml.safe_load((ROOT / 'contract/senai-worker-1/pins.yaml').read_text())
     pinned = {w['id']: w['sha256_canonical'] for w in pins['workflows'] if w['status'] == 'pinned'}
     files = {
-        'ltx25-t2v-v1': 'ltx25-t2v-v1.json',
-        'ltx25-i2v-v1': 'ltx25-i2v-v1.json',
-        'ltx25-flf-v1': 'ltx25-flf-v1.json',
+        'senfers1-t2v-v1': 'senfers1-t2v-v1.json',
+        'senfers1-i2v-v1': 'senfers1-i2v-v1.json',
+        'senfers1-flf-v1': 'senfers1-flf-v1.json',
     }
     for workflow_id, filename in files.items():
         graph = json.loads((ROOT / 'workflow' / filename).read_text())

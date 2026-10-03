@@ -158,12 +158,12 @@ def worker_paths(tmp_path, monkeypatch):
 
 @pytest.fixture
 def ltx_ready(tmp_path, monkeypatch):
-    plan = workflow_models.load_manifests("ltx25.yaml", WORKFLOW_DIR, tmp_path / "models").plan
+    plan = workflow_models.load_manifests("senfers1.yaml", WORKFLOW_DIR, tmp_path / "models").plan
     hf_cache_root = tmp_path / "hf-cache"
     seed_hf_cache(hf_cache_root, plan)
     state_path = tmp_path / "state.json"
     state = run_verify(
-        monkeypatch, workflows="ltx25.yaml", model_root=tmp_path / "models",
+        monkeypatch, workflows="senfers1.yaml", model_root=tmp_path / "models",
         hf_cache_root=hf_cache_root, state_path=state_path, paths_path=tmp_path / "paths.yaml",
     )
     assert state["ready"] is True, state
@@ -301,13 +301,13 @@ def test_scenario1_ltx_t2v_end_to_end(ltx_ready, worker_paths):
     )
     print("SCENARIO 1 allowed_class_types:", len(state["allowed_class_types"]), state["allowed_class_types"][:5])
     if not any(item.get("bytes") for item in workflow_models.load_manifests(
-        "ltx25.yaml", WORKFLOW_DIR, Path("/nonexistent")
+        "senfers1.yaml", WORKFLOW_DIR, Path("/nonexistent")
     ).plan.values()):
-        print("SCENARIO 1 note: every ltx25.yaml model still has bytes: 0 (unpinned) — "
+        print("SCENARIO 1 note: every senfers1.yaml model still has bytes: 0 (unpinned) — "
               "size-mismatch detection cannot be exercised for LTX; fixture files just need to exist.")
 
-    graph = json.loads((WORKFLOW_DIR / "ltx25-t2v-v1.json").read_text())
-    mp4_path = worker_paths["output_dir"] / "LTX-2.5_00001_.mp4"
+    graph = json.loads((WORKFLOW_DIR / "senfers1-t2v-v1.json").read_text())
+    mp4_path = worker_paths["output_dir"] / "Senfers1_00001_.mp4"
     make_output_mp4(mp4_path)
     fake.history_store["p1"] = {"outputs": {"75": {"videos": [{"filename": mp4_path.name, "subfolder": "", "type": "output"}]}}}
     fake.ws_script = [
@@ -316,12 +316,12 @@ def test_scenario1_ltx_t2v_end_to_end(ltx_ready, worker_paths):
         {"message": executing(None)},
     ]
 
-    job_input = build_job_input(graph, trace_overrides={"workflow_id": "ltx25-t2v-v1"})
+    job_input = build_job_input(graph, trace_overrides={"workflow_id": "senfers1-t2v-v1"})
     result = handler.handler({"id": "int-job-1", "input": job_input})
     validate_response(result)
 
     assert result["status"] == "success", result
-    assert result["trace"]["workflows"] == "ltx25.yaml"
+    assert result["trace"]["workflows"] == "senfers1.yaml"
     assert result["trace"]["manifest_sha256"] == state["manifest_sha256"]
     key = result["outputs"][0]["key"]
     assert key == f"renders/int-gen-1/1/00-{mp4_path.name}"
@@ -334,7 +334,7 @@ def test_scenario1_ltx_t2v_end_to_end(ltx_ready, worker_paths):
 # Scenario 2
 # ---------------------------------------------------------------------------
 def test_scenario2_disallowed_node_rejected_before_prompt(ltx_ready):
-    graph = json.loads((WORKFLOW_DIR / "ltx25-t2v-v1.json").read_text())
+    graph = json.loads((WORKFLOW_DIR / "senfers1-t2v-v1.json").read_text())
     graph["9999"] = {"class_type": "SaveImageWebsocket", "inputs": {}}
     job_input = build_job_input(graph)
 
