@@ -125,11 +125,11 @@ RUN echo "${COMFYUI_VERSION}" > /etc/senai-comfyui-version
 # Go back to the root
 WORKDIR /
 
-# LTX 2.5 serving image (RunPod GitHub build: no build args, no --target —
-# see docs/deployment.md and tests/test_dockerfile_ltx25.py). SYSTEM above is
-# repeated verbatim from ./Dockerfile; APP below is verbatim except
-# CUSTOM_NODE_MANIFESTS defaults to ltx25.yaml so the ComfyUI-LTXVideo custom
-# node (pinned in workflow/ltx25.yaml) is installed at build time without a
+# Senfers 1.0 (self-hosted LTX 2.5) serving image (RunPod GitHub build: no build
+# args, no --target — see docs/deployment.md and tests/test_dockerfile_senfers1.py).
+# SYSTEM above is repeated verbatim from ./Dockerfile; APP below is verbatim except
+# CUSTOM_NODE_MANIFESTS defaults to senfers1.yaml so the ComfyUI-LTXVideo custom
+# node (pinned in workflow/senfers1.yaml) is installed at build time without a
 # build arg the GitHub integration cannot pass. No weights are baked here:
 # the LTX set uses RunPod's Hugging Face cached-model feature
 # (Lightricks/LTX-2.5 + Comfy-Org/gemma-4, attached on the endpoint template),
@@ -167,6 +167,6 @@ CMD ["/start.sh"]
 
 # Optional custom-node dependencies, chosen by manifest at build time.
 # No workflow, model family or weights are selected by default.
-ARG CUSTOM_NODE_MANIFESTS="ltx25.yaml"
+ARG CUSTOM_NODE_MANIFESTS="senfers1.yaml"
 COPY scripts/install-workflow-nodes.py /install-workflow-nodes.py
 RUN python /install-workflow-nodes.py --manifests "$CUSTOM_NODE_MANIFESTS"

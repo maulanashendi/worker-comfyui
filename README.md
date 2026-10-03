@@ -48,7 +48,7 @@ Semua perintah berikut dijalankan dari direktori `worker-comfyui/`.
 | Workflow | Nilai `WORKFLOWS` | Sumber daftar model | Dependency tambahan saat build |
 | --- | --- | --- | --- |
 | MiniMax H3 R2V | `minimax-h3.yaml` | Metadata di `video_minimax_h3_r2v.json`; 5 aset | Tidak ada custom node dalam graph yang disediakan |
-| LTX 2.5 Senai | `ltx25.yaml` | Enam aset untuk graph T2V, I2V, dan FLF | `CUSTOM_NODE_MANIFESTS=ltx25.yaml` |
+| Senfers 1.0 (LTX 2.5 self-hosted) | `senfers1.yaml` | Enam aset untuk graph T2V, I2V, dan FLF | `CUSTOM_NODE_MANIFESTS=senfers1.yaml` |
 
 Contoh berikut memakai MiniMax:
 
@@ -90,15 +90,15 @@ docker build --platform linux/amd64 -t "$WORKER_IMAGE" .
 Untuk LTX, gunakan Dockerfile yang sama dengan dependency terpilih:
 
 ```bash
-export WORKFLOWS=ltx25.yaml
+export WORKFLOWS=senfers1.yaml
 export WORKER_IMAGE=worker-comfyui:with-ltx-nodes
 docker build --platform linux/amd64 \
-  --build-arg CUSTOM_NODE_MANIFESTS=ltx25.yaml \
+  --build-arg CUSTOM_NODE_MANIFESTS=senfers1.yaml \
   -t "$WORKER_IMAGE" .
 ```
 
 Build arg memasang custom node yang dipin dalam YAML, bukan bobot model atau
-pilihan workflow runtime. Tidak ada target `--target ltx25`. Perubahan dependency
+pilihan workflow runtime. Tidak ada target `--target senfers1`. Perubahan dependency
 Python/custom node membutuhkan rebuild; perubahan model tidak.
 
 ### 4. Periksa checklist model terlebih dahulu
@@ -260,7 +260,7 @@ oleh tes CPU di atas.
 1. Tambahkan JSON ke `workflow/`. Jika editor JSON memiliki `properties.models`,
    buat YAML yang merujuk file itu, seperti [`minimax-h3.yaml`](workflow/minimax-h3.yaml).
    Untuk graph tanpa URL model, tulis `models` secara eksplisit seperti
-   [`ltx25.yaml`](workflow/ltx25.yaml).
+   [`senfers1.yaml`](workflow/senfers1.yaml).
 2. Pasang definisi workflow melalui volume dengan `WORKFLOW_DIR` yang sesuai,
    atau rebuild image untuk menyertakan file baru di `/workflow`.
 3. Jika ada custom node baru, deklarasikan repo dan commit dalam YAML, lalu build

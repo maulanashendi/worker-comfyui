@@ -1,7 +1,7 @@
 # Machine-checkable pins for the runpod-senai-worker contract.
 # Human-readable rationale lives in CONTRACT.md — this file is the numbers only.
 
-contract_version: "0.3.0"
+contract_version: "0.4.0"
 protocol: "senai-worker/1"
 
 producer:
@@ -20,15 +20,15 @@ runtime:
   verified: false
 
 adapters:
-  - name: "ltx25_senai_worker_v1"
-    set: "ltx25.yaml"
-    workflows: ["ltx25-t2v-v1", "ltx25-i2v-v1", "ltx25-flf-v1"]
+  - name: "senfers1_senai_worker_v1"
+    set: "senfers1.yaml"
+    workflows: ["senfers1-t2v-v1", "senfers1-i2v-v1", "senfers1-flf-v1"]
   - name: "minimax_h3_senai_worker_v1"
     set: "minimax-h3.yaml"
     workflows: ["minimax-h3-r2v-v1", "minimax-h3-motion-v1"]
 
 sets:
-  - manifest: "ltx25.yaml"
+  - manifest: "senfers1.yaml"
     model_references:     # RunPod cached models; revision pinned to a commit at G4
       - {repo: "Lightricks/LTX-2.5", revision: null}
       - {repo: "Comfy-Org/gemma-4", revision: null}
@@ -39,18 +39,19 @@ sets:
 
 # Canonical sha256 of every graph senai sends through this protocol.
 # Algorithm: sha256(json.dumps(d, sort_keys=True, separators=(',', ':')).encode())
+# Senfers 1.0 rename (2026-10-03): hashes recomputed after filename_prefix video/Senfers1_*.
 workflows:
-  - id: "ltx25-t2v-v1"
-    path: "backend/src/senai/modules/providers/runpod/workflows/ltx25-t2v-v1.json"
-    sha256_canonical: "9f35e983796ddeacdd4403fc86980a7ff311f4509b4183be6dfffde2897bfddc"
+  - id: "senfers1-t2v-v1"
+    path: "backend/src/senai/modules/providers/runpod/workflows/senfers1-t2v-v1.json"
+    sha256_canonical: "0a2f279642ebdbba130aaad70d0c1ba3ce0f81e45a2f6f21e0b8e31decd4f7f0"
     status: "pinned"      # same graph as contracts/runpod-ltx25/pins.yaml
-  - id: "ltx25-i2v-v1"
-    path: "backend/src/senai/modules/providers/runpod/workflows/ltx25-i2v-v1.json"
-    sha256_canonical: "be0ee529599ea4754d7d7612bb709b5e6b7f2101c8cc1780f6632255e9d6bfcc"
+  - id: "senfers1-i2v-v1"
+    path: "backend/src/senai/modules/providers/runpod/workflows/senfers1-i2v-v1.json"
+    sha256_canonical: "27057f2b7566f2ae609e1878f1fce435b13a76e4aaf2b29ecb6c127950883dc5"
     status: "pinned"
-  - id: "ltx25-flf-v1"
-    path: "backend/src/senai/modules/providers/runpod/workflows/ltx25-flf-v1.json"
-    sha256_canonical: "b7706a3d5e0736b5e5459a21b99b928f9676bbf01a1fb86377b0d7451856537d"
+  - id: "senfers1-flf-v1"
+    path: "backend/src/senai/modules/providers/runpod/workflows/senfers1-flf-v1.json"
+    sha256_canonical: "b0cfd6dff3f6a492df00a401bcd1717abdb1da2dc030158735f606cd04808c12"
     status: "pinned"
   - id: "minimax-h3-r2v-v1"
     path: "backend/src/senai/modules/providers/runpod/workflows/minimax-h3-r2v-v1.json"

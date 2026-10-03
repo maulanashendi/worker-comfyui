@@ -1,26 +1,26 @@
 # LTX 2.5 1080p -> ~4K (3840x2176) video upscale with the Refine-Details IC-LoRA, int8 only.
-# Path A (ltx25-upscale-a-v1.json): Lightricks/ComfyUI-LTXVideo@5722b53
+# Path A (senfers1-upscale-a-v1.json): Lightricks/ComfyUI-LTXVideo@5722b53
 #   example_workflows/2.5/LTX-2.5_V2V_TiledFusion_Upscale.json - lanczos guide at the output
 #   canvas, LTXVTiledFusionSampler (1024x576 tiles, overlap 0.5, euler, 8 steps from noise).
-# Path B (ltx25-upscale-b-v1.json): stage 2 of LTX-2.5_V2V_TiledFusion_Native_4K_8K.json run on
+# Path B (senfers1-upscale-b-v1.json): stage 2 of LTX-2.5_V2V_TiledFusion_Native_4K_8K.json run on
 #   our clip - VAE encode, latent x2 upscaler, same guide/sampler, 3 steps from 0.909375.
 # Changes vs upstream: int8 transformer and int8 Gemma 12B in place of the bf16 files, no API
 # text encoder, no prompt enhancer, one temporal extent (no streaming windows), source audio
 # muxed as is. Never swap in the bf16 transformer here.
 # RAM: ~40 GB staged plus ~30-40 GB of 4K frame tensors; run this set ALONE
-# (WORKFLOWS=ltx25-upscale.yaml). A step takes ~3-4.5 min at 4K and the fusion sampler reports
+# (WORKFLOWS=senfers1-upscale.yaml). A step takes ~3-4.5 min at 4K and the fusion sampler reports
 # progress once per step: requests must also send limits.no_progress_sec >= 900, and the
 # service needs JOB_DEADLINE_CEILING_SEC >= 3600 (the effective ceiling is the minimum).
 version: 2
-set: ltx25-upscale
+set: senfers1-upscale
 requires_comfyui: '>=0.38.0'
 custom_nodes:
 - name: ComfyUI-LTXVideo
   repo: https://github.com/Lightricks/ComfyUI-LTXVideo.git
   revision: 5722b53a08daec57f5442347b235cb84df0afbe7
 workflows:
-- ltx25-upscale-a-v1.json
-- ltx25-upscale-b-v1.json
+- senfers1-upscale-a-v1.json
+- senfers1-upscale-b-v1.json
 allowed_class_types_extra: []
 limits:
   no_progress_sec: 900

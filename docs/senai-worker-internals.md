@@ -148,7 +148,7 @@ dan `serverless_start` ke berkas yang sama.
 ```json
 {
   "protocol": "senai-worker/1",
-  "workflows": "ltx25.yaml",
+  "workflows": "senfers1.yaml",
   "manifest_sha256": "<sha256 kanonik isi manifest yang dipilih>",
   "comfyui": "v0.36.0",
   "ready": true,

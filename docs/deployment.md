@@ -115,7 +115,7 @@ docker build --platform linux/amd64 -t worker-comfyui:generic .
 ```
 
 For extra node dependencies, use the same Dockerfile with
-`--build-arg CUSTOM_NODE_MANIFESTS=ltx25.yaml`. There is no `ltx25` target and no
+`--build-arg CUSTOM_NODE_MANIFESTS=senfers1.yaml`. There is no `senfers1` target and no
 hardcoded LTX runtime environment. Default `docker buildx bake` builds only base.
 Historical baked-model release targets remain explicit opt-ins; adding another
 workflow does not require adding one of these targets.
@@ -146,7 +146,7 @@ COMFY_MODEL_ROOT=/runpod-volume/models
 REFRESH_WORKER=true
 ```
 
-Switch to `WORKFLOWS=ltx25.yaml` for LTX after preparing its cache and ensuring
+Switch to `WORKFLOWS=senfers1.yaml` for LTX after preparing its cache and ensuring
 its node dependencies are installed. Mounted workflow definitions can change
 without a rebuild. Select only workflows the endpoint actually serves.
 

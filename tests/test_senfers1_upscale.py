@@ -15,11 +15,11 @@ import guard
 from senai_errors import WorkerError
 import workflow_models as models
 
-from tests.test_ltx25_ingredients import sparse_cache, verify
+from tests.test_senfers1_ingredients import sparse_cache, verify
 
 WORKFLOW_DIR = ROOT / 'workflow'
-GRAPH_A = json.loads((WORKFLOW_DIR / 'ltx25-upscale-a-v1.json').read_text())
-GRAPH_B = json.loads((WORKFLOW_DIR / 'ltx25-upscale-b-v1.json').read_text())
+GRAPH_A = json.loads((WORKFLOW_DIR / 'senfers1-upscale-a-v1.json').read_text())
+GRAPH_B = json.loads((WORKFLOW_DIR / 'senfers1-upscale-b-v1.json').read_text())
 LTX_REV = '5e6e71018ee1756ed329b697a7b4aedc934dfce9'
 LORA = 'ltx-2.5-22b-ic-lora-refine-details-1.0.safetensors'
 LORA_REPO = 'Lightricks/LTX-2.5-22b-IC-LoRA-Refine-Details'
@@ -41,7 +41,7 @@ GRAPHS = pytest.mark.parametrize('graph', [GRAPH_A, GRAPH_B], ids=['a', 'b'])
 # --- manifest + graphs ----------------------------------------------------------
 
 def test_manifest_declares_int8_models_lora_and_upscaler(tmp_path):
-    manifests = models.load_manifests('ltx25-upscale.yaml', WORKFLOW_DIR, tmp_path)
+    manifests = models.load_manifests('senfers1-upscale.yaml', WORKFLOW_DIR, tmp_path)
     paths = sorted(item['path'] for item in manifests.plan.values())
     assert paths == [
         'diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
@@ -102,7 +102,7 @@ def test_path_b_refines_the_upsampled_source_latent_for_three_steps():
 
 
 def test_combined_with_other_ltx_sets_shares_models(tmp_path):
-    manifests = models.load_manifests('ltx25.yaml,ltx25-ingredients.yaml,ltx25-motion.yaml,ltx25-upscale.yaml',
+    manifests = models.load_manifests('senfers1.yaml,senfers1-ingredients.yaml,senfers1-motion.yaml,senfers1-upscale.yaml',
                                       WORKFLOW_DIR, tmp_path)
     assert len(manifests.plan) == 11
 
@@ -111,8 +111,8 @@ def test_combined_with_other_ltx_sets_shares_models(tmp_path):
 
 def booted_state(tmp_path, monkeypatch):
     hf_cache_root = tmp_path / 'hf-cache'
-    plan = sparse_cache(hf_cache_root, 'ltx25-upscale.yaml', tmp_path / 'comfy-models')
-    state = verify(tmp_path, monkeypatch, 'ltx25-upscale.yaml', hf_cache_root)
+    plan = sparse_cache(hf_cache_root, 'senfers1-upscale.yaml', tmp_path / 'comfy-models')
+    state = verify(tmp_path, monkeypatch, 'senfers1-upscale.yaml', hf_cache_root)
     assert state['ready'] is True, state
     assert state['models']['present'] == len(plan) == 5
     assert state['limits'] == {'no_progress_sec': 900, 'no_progress_load_sec': 900, 'execution_ceiling_sec': 3600}
@@ -137,7 +137,7 @@ def envelope(graph, workflow_id):
 
 def test_upscale_only_boot_passes_both_graphs(tmp_path, monkeypatch):
     allowed, declared = booted_state(tmp_path, monkeypatch)
-    for graph, workflow_id in ((GRAPH_A, 'ltx25-upscale-a-v1'), (GRAPH_B, 'ltx25-upscale-b-v1')):
+    for graph, workflow_id in ((GRAPH_A, 'senfers1-upscale-a-v1'), (GRAPH_B, 'senfers1-upscale-b-v1')):
         env = envelope(graph, workflow_id)
         assert env.no_progress_sec == 900
         guard.check_allowlist(env.workflow, allowed)
@@ -168,7 +168,7 @@ def test_guard_rejects_q8_loader_api_encoder_and_bf16(graph, tmp_path, monkeypat
 
 def test_upscale_only_set_rejects_other_ltx_graphs(tmp_path, monkeypatch):
     allowed, declared = booted_state(tmp_path, monkeypatch)
-    motion = json.loads((WORKFLOW_DIR / 'ltx25-motion-v1.json').read_text())
+    motion = json.loads((WORKFLOW_DIR / 'senfers1-motion-v1.json').read_text())
     with pytest.raises(WorkerError) as exc:
         guard.check_allowlist(motion, allowed)  # DWPreprocessor, SamplerCustomAdvanced, ...
     assert exc.value.code == 'NODE_NOT_ALLOWED'
@@ -178,10 +178,10 @@ def test_upscale_only_set_rejects_other_ltx_graphs(tmp_path, monkeypatch):
 
 def test_stage_list_for_upscale_set_alone(tmp_path):
     hf_cache_root = tmp_path / 'hf-cache'
-    sparse_cache(hf_cache_root, 'ltx25.yaml,ltx25-ingredients.yaml,ltx25-motion.yaml,ltx25-upscale.yaml', tmp_path / 'm')
-    plan = models.load_plan('ltx25-upscale.yaml', WORKFLOW_DIR, tmp_path / 'm')
+    sparse_cache(hf_cache_root, 'senfers1.yaml,senfers1-ingredients.yaml,senfers1-motion.yaml,senfers1-upscale.yaml', tmp_path / 'm')
+    plan = models.load_plan('senfers1-upscale.yaml', WORKFLOW_DIR, tmp_path / 'm')
     assert models.stage_files(plan, hf_cache_root) == UPSCALE_FILES
-    env = {**os.environ, 'WORKFLOWS': 'ltx25-upscale.yaml', 'WORKFLOW_DIR': str(WORKFLOW_DIR),
+    env = {**os.environ, 'WORKFLOWS': 'senfers1-upscale.yaml', 'WORKFLOW_DIR': str(WORKFLOW_DIR),
            'HF_CACHE_ROOT': str(hf_cache_root), 'COMFY_MODEL_ROOT': str(tmp_path / 'm')}
     result = subprocess.run([sys.executable, str(ROOT / 'src/workflow_models.py'), '--stage-list'],
                             env=env, capture_output=True, text=True)

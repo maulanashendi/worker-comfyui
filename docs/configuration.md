@@ -87,7 +87,7 @@ inside the worker) are in
 
 ### One image, many deployments
 
-The same Docker image serves every Senai deployment. `WORKFLOWS=ltx25.yaml` or
+The same Docker image serves every Senai deployment. `WORKFLOWS=senfers1.yaml` or
 `WORKFLOWS=minimax-h3.yaml` (never both) picks which model set — and therefore
 which `class_type` allowlist and graphs — that particular endpoint verifies
 and accepts. See [runtime manifests](customization.md#generic-workflow-selection-and-model-cache)
@@ -102,7 +102,7 @@ native "cached model" feature:
 
 | Set (`WORKFLOWS`) | Hugging Face repos |
 | --- | --- |
-| `ltx25.yaml` | `Lightricks/LTX-2.5` (gated — requires `HF_TOKEN`), `Comfy-Org/gemma-4` |
+| `senfers1.yaml` | `Lightricks/LTX-2.5` (gated — requires `HF_TOKEN`), `Comfy-Org/gemma-4` |
 | `minimax-h3.yaml` | `Comfy-Org/MiniMax-H3`, `Comfy-Org/SDPose` |
 
 RunPod caches the selected repos under `HF_CACHE_ROOT` (default
@@ -128,7 +128,7 @@ truth. Do not add new env vars without updating that file first.
 
 | Env | Default | Nilai produksi | Catatan |
 | --- | --- | --- | --- |
-| `WORKFLOWS` | — (wajib) | `ltx25.yaml` atau `minimax-h3.yaml` | Selektor set, daftar `workflow/<set>.yaml` dipisah koma. |
+| `WORKFLOWS` | — (wajib) | `senfers1.yaml` atau `minimax-h3.yaml` | Selektor set, daftar `workflow/<set>.yaml` dipisah koma. |
 | `MODEL_DOWNLOAD_POLICY` | — (wajib) | `cache-only` | Worker GPU tidak pernah mengunduh bobot. |
 | `PREPARE_MODELS_ONLY` | `false` | `false` | Hanya dipakai di job preparation terpisah, tidak di endpoint serving. |
 | `MODEL_DOWNLOAD_CHECK_ONLY` | `false` | `false` | Idem, dipakai untuk mencetak checklist saja. |

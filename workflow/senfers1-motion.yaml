@@ -5,7 +5,7 @@
 # and int8 Gemma 12B in place of the bf16 files, no API text encoder, no prompt enhancer
 # and no upscale stage. Never swap in the bf16 transformer here.
 version: 2
-set: ltx25-motion
+set: senfers1-motion
 requires_comfyui: '>=0.38.0'
 custom_nodes:
 - name: ComfyUI-LTXVideo
@@ -23,7 +23,7 @@ custom_nodes:
   - matplotlib
   - scikit-image
 workflows:
-- ltx25-motion-v1.json
+- senfers1-motion-v1.json
 allowed_class_types_extra: []
 limits:
   no_progress_sec: 120

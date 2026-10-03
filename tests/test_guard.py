@@ -30,7 +30,7 @@ def _load(name):
 
 
 WORKFLOW_EXAMPLES = [
-    "ltx25_i2v_inline_image.request.json",
+    "senfers1_i2v_inline_image.request.json",
     "h3_r2v_url_inputs.request.json",
 ]
 
@@ -47,7 +47,7 @@ def test_health_example_passes_parse_envelope():
 
 
 def _base_workflow_input(**overrides):
-    job_input = json.loads(json.dumps(_load("ltx25_i2v_inline_image.request.json")))
+    job_input = json.loads(json.dumps(_load("senfers1_i2v_inline_image.request.json")))
     job_input.update(overrides)
     return job_input
 

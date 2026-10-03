@@ -17,7 +17,7 @@
       "75": {
         "class_type": "SaveVideo",
         "inputs": {
-          "filename_prefix": "video/LTX-2.5_i2v",
+          "filename_prefix": "video/Senfers1_i2v",
           "format": "auto",
           "codec": "auto",
           "video": [
@@ -37,11 +37,11 @@
     "trace": {
       "generation_id": "0f7f5a52-3a4c-4d53-9d6e-2b8f3c1a7e10",
       "attempt": 1,
-      "binding_alias": "ltx25-self",
+      "binding_alias": "senfers1-self",
       "binding_revision": 1,
-      "adapter": "ltx25_senai_worker_v1",
-      "workflow_id": "ltx25-i2v-v1",
-      "graph_sha256": "be0ee529599ea4754d7d7612bb709b5e6b7f2101c8cc1780f6632255e9d6bfcc"
+      "adapter": "senfers1_senai_worker_v1",
+      "workflow_id": "senfers1-i2v-v1",
+      "graph_sha256": "27057f2b7566f2ae609e1878f1fce435b13a76e4aaf2b29ecb6c127950883dc5"
     },
     "limits": {
       "deadline_at": "2026-09-23T10:35:00Z",

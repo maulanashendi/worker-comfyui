@@ -129,7 +129,7 @@ def test_boot_continues_unready_and_records_full_timeline(tmp_path):
     bin_dir = _fake_bin_dir(tmp_path)
     env = {
         **os.environ, 'PATH': str(bin_dir) + ':' + os.environ['PATH'], 'TEST_ROOT': str(tmp_path),
-        'SCENARIO': 'both_run', 'PUBLIC_KEY': '', 'WORKFLOWS': 'ltx25.yaml',
+        'SCENARIO': 'both_run', 'PUBLIC_KEY': '', 'WORKFLOWS': 'senfers1.yaml',
         'WORKFLOW_DIR': str(ROOT / 'workflow'), 'COMFY_MODEL_ROOT': str(tmp_path / 'models'),
         'HF_CACHE_ROOT': str(tmp_path / 'hf-cache'), 'MODEL_DOWNLOAD_POLICY': 'cache-only',
         'COMFY_PID_FILE': str(tmp_path / 'comfyui.pid'),
@@ -195,7 +195,7 @@ def _overlap_bin_dir(tmp_path):
 def _overlap_env(tmp_path, *, bin_dir, hf_cache_root, stage_dir):
     return {
         **os.environ, 'PATH': str(bin_dir) + ':' + os.environ['PATH'], 'TEST_ROOT': str(tmp_path),
-        'PUBLIC_KEY': '', 'WORKFLOWS': 'ltx25.yaml', 'SENAI_TRANSPORT': 'cloudrun',
+        'PUBLIC_KEY': '', 'WORKFLOWS': 'senfers1.yaml', 'SENAI_TRANSPORT': 'cloudrun',
         'HF_CACHE_ROOT': str(hf_cache_root), 'SENAI_HF_STAGE_DIR': str(stage_dir),
         'COMFY_MODEL_ROOT': str(tmp_path / 'models'), 'MODEL_DOWNLOAD_POLICY': 'cache-only',
         'COMFY_PID_FILE': str(tmp_path / 'comfyui.pid'),

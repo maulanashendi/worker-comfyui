@@ -30,7 +30,7 @@ def _probe(path):
 @pytest.fixture
 def sliced_mp4(tmp_path):
     """A small h264+aac clip encoded the way PyAV/SaveVideo does today (CRF 23, sliced threads)."""
-    path = tmp_path / 'LTX-2.5_t2v_00001_.mp4'
+    path = tmp_path / 'Senfers1_t2v_00001_.mp4'
     _ffmpeg(['-f', 'lavfi', '-i', 'testsrc2=size=128x128:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=440',
              '-t', '1', '-c:v', 'libx264', '-crf', '23', '-threads', '4', '-x264-params', 'sliced-threads=1',
              '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '64k', str(path)])
@@ -91,14 +91,14 @@ def test_transcode_command_uses_frame_threads_and_copies_audio():
 def test_unset_uploads_saved_file_unchanged(sliced_mp4):
     entries, uploaded = _collect(sliced_mp4, 'videos', None)
     assert uploaded[entries[0]['key']] == sliced_mp4.read_bytes()
-    assert entries[0]['key'] == 'renders/gen-1/1/00-LTX-2.5_t2v_00001_.mp4'
+    assert entries[0]['key'] == 'renders/gen-1/1/00-Senfers1_t2v_00001_.mp4'
 
 
 @needs_ffmpeg
 def test_transcode_reencodes_video_and_keeps_audio(sliced_mp4, tmp_path):
     entries, uploaded = _collect(sliced_mp4, 'videos', 'h264-crf16')
     (entry,) = entries
-    assert entry['key'] == 'renders/gen-1/1/00-LTX-2.5_t2v_00001_.mp4'
+    assert entry['key'] == 'renders/gen-1/1/00-Senfers1_t2v_00001_.mp4'
     body = uploaded[entry['key']]
     assert body != sliced_mp4.read_bytes()
     assert entry['bytes'] == len(body) and entry['media_type'] == 'video/mp4'
